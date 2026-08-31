@@ -339,14 +339,42 @@ python manage.py loaddata scm_demo
 
 ---
 
-## 7. Probar las APIs con Postman
+## 7. Probar las APIs (Swagger UI y Postman)
+
+Hay dos formas de probar los endpoints. **Swagger** es la más rápida para un
+chequeo manual; **Postman** conviene para armar colecciones y flujos repetibles.
+
+### 7.1. Con Swagger UI (rápido, sin instalar nada)
+
+Con el server levantado, abrí <http://localhost:8000/api/docs/>. Es la
+documentación interactiva que genera **drf-spectacular** a partir del código: se
+actualiza sola a medida que agregás serializers y viewsets.
+
+1. Se listan todos los endpoints agrupados por módulo, con su esquema de
+   request/response.
+2. Para endpoints protegidos, primero autenticá:
+   - Expandí `POST /api/auth/login/` → **Try it out** → completá
+     `{ "username": "TU_SUPERUSUARIO", "password": "TU_PASSWORD" }` → **Execute**.
+   - Copiá el valor de `access` de la respuesta.
+   - Botón **Authorize** (arriba a la derecha) → pegá `Bearer <access>` → **Authorize**.
+3. Ahora cualquier endpoint se prueba con **Try it out** → completar parámetros /
+   body → **Execute**. Swagger muestra la URL (`curl` equivalente), el status y el
+   cuerpo de la respuesta.
+4. El esquema crudo OpenAPI está en <http://localhost:8000/api/schema/> (sirve
+   para importarlo en Postman, Insomnia, generar clientes, etc.).
+
+> En el estado actual (esqueleto) Swagger solo muestra los endpoints de `auth/` y
+> la documentación. Cada recurso de módulo aparece cuando implementás su ViewSet
+> y descomentás el `include()` en `config/urls.py`.
+
+### 7.2. Con Postman
 
 > La colección de Postman **no se versiona en el repo**. Armá la tuya a mano con
 > los endpoints que vayas creando, o importá el esquema OpenAPI: en Postman →
 > **Import** → pegá `http://localhost:8000/api/schema/` y Postman genera la
 > colección sola.
 
-### 7.1. Configurar el entorno
+#### 7.2.1. Configurar el entorno
 
 Creá en Postman un *environment* con:
 
@@ -359,7 +387,7 @@ Creá en Postman un *environment* con:
 Seteá la autenticación **a nivel colección** como *Bearer Token* con valor
 `{{access_token}}`, así todos los requests la heredan.
 
-### 7.2. Autenticarse (token JWT)
+#### 7.2.2. Autenticarse (token JWT)
 
 1. `POST {{base_url}}/api/auth/login/` con body JSON:
    ```json
@@ -378,6 +406,8 @@ Seteá la autenticación **a nivel colección** como *Bearer Token* con valor
    `{ "refresh": "{{refresh_token}}" }`.
 
 ### 7.3. Endpoints previstos (cuando cada módulo los implemente)
+
+Aplica tanto para Swagger como para Postman.
 
 Prefijo común: `http://localhost:8000/api/`
 
