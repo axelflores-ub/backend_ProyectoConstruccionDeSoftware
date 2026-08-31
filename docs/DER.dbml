@@ -1,0 +1,147 @@
+// Diagrama Entidad-Relación de CorralónDB
+// Pegar en https://dbdiagram.io para visualizarlo.
+// Es la fuente de verdad del modelo: los `db_table` de los modelos Django
+// respetan estos nombres.
+
+Table privilegio {
+  id int [pk, increment]
+  nombre varchar(50) [not null, unique]
+  descripcion varchar(150)
+}
+
+Table usuario {
+  id int [pk, increment]
+  nombre varchar(100) [not null]
+  email varchar(150) [unique]
+  password varchar(255) [not null]
+  privilegio_id int [ref: > privilegio.id]
+}
+
+Table rubro {
+  id int [pk, increment]
+  nombre varchar(100) [not null]
+  descripcion varchar(200)
+}
+
+Table producto {
+  id int [pk, increment]
+  codigo varchar(50) [not null, unique]
+  nombre varchar(150) [not null]
+  descripcion varchar(255)
+  precio decimal(12,2) [not null]
+  rubro_id int [ref: > rubro.id]
+}
+
+Table movimiento_inventario {
+  id int [pk, increment]
+  producto_id int [not null, ref: > producto.id]
+  usuario_id int [not null, ref: > usuario.id]
+  tipo varchar(20) [not null]
+  cantidad int [not null]
+  fecha timestamp [not null]
+  observacion varchar(255)
+}
+
+Table proveedor {
+  id int [pk, increment]
+  nombre varchar(150) [not null]
+  telefono varchar(50)
+  email varchar(150)
+  direccion varchar(200)
+}
+
+Table estado_orden_compra {
+  id int [pk, increment]
+  nombre varchar(50) [not null, unique]
+}
+
+Table orden_compra {
+  id int [pk, increment]
+  proveedor_id int [not null, ref: > proveedor.id]
+  estado_id int [not null, ref: > estado_orden_compra.id]
+  fecha timestamp [not null]
+  total decimal(12,2) [not null]
+}
+
+Table orden_compra_detalle {
+  id int [pk, increment]
+  orden_compra_id int [not null, ref: > orden_compra.id]
+  producto_id int [not null, ref: > producto.id]
+  cantidad int [not null]
+  precio_unitario decimal(12,2) [not null]
+}
+
+Table cliente {
+  id int [pk, increment]
+  nombre varchar(150) [not null]
+  telefono varchar(50)
+  email varchar(150)
+  direccion varchar(200)
+}
+
+Table estado_orden_venta {
+  id int [pk, increment]
+  nombre varchar(50) [not null, unique]
+}
+
+Table orden_venta {
+  id int [pk, increment]
+  cliente_id int [not null, ref: > cliente.id]
+  estado_id int [not null, ref: > estado_orden_venta.id]
+  fecha timestamp [not null]
+  total decimal(12,2) [not null]
+}
+
+Table orden_venta_detalle {
+  id int [pk, increment]
+  orden_venta_id int [not null, ref: > orden_venta.id]
+  producto_id int [not null, ref: > producto.id]
+  cantidad int [not null]
+  precio_unitario decimal(12,2) [not null]
+}
+
+Table periodo {
+  id int [pk, increment]
+  anio int [not null]
+  mes int [not null]
+
+  indexes {
+    (anio, mes) [unique]
+  }
+}
+
+Table cierre_mensual {
+  id int [pk, increment]
+  periodo_id int [not null, ref: > periodo.id]
+  fecha_cierre timestamp
+  estado varchar(20) [not null]
+}
+
+Table diario {
+  id int [pk, increment]
+  cierre_mensual_id int [not null, ref: > cierre_mensual.id]
+  fecha timestamp [not null]
+  descripcion varchar(255)
+}
+
+Table factura_cabecera {
+  id int [pk, increment]
+  orden_venta_id int [ref: > orden_venta.id]
+  orden_compra_id int [ref: > orden_compra.id]
+  diario_id int [ref: > diario.id]
+  tipo varchar(20) [not null]
+  numero varchar(50) [not null]
+  fecha timestamp [not null]
+  subtotal decimal(12,2) [not null]
+  impuestos decimal(12,2) [not null]
+  total decimal(12,2) [not null]
+}
+
+Table factura_detalle {
+  id int [pk, increment]
+  factura_id int [not null, ref: > factura_cabecera.id]
+  producto_id int [not null, ref: > producto.id]
+  cantidad int [not null]
+  precio_unitario decimal(12,2) [not null]
+  subtotal decimal(12,2) [not null]
+}

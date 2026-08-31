@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtualenv
+.venv/
+venv/
+env/
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+media/
+staticfiles/
+
+# Entorno
+.env
+
+# Postman: cada quien mantiene su colección local, no se versiona
+postman/
+*.postman_collection.json
+*.postman_environment.json
+
+# Editores / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

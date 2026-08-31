@@ -1,0 +1,2 @@
+# Colocá aquí archivos .sql o .sh de inicialización si los necesitás.
+# Solo se ejecutan la primera vez que se crea el volumen corralon_pgdata.

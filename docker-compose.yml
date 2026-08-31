@@ -1,0 +1,30 @@
+# Docker se usa SOLO para la base de datos, de modo que todo el equipo
+# trabaje contra la misma PostgreSQL con la misma estructura y datos.
+# Django y (a futuro) el frontend corren localmente.
+
+services:
+  db:
+    image: postgres:16
+    container_name: corralon_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: corralonDB
+      POSTGRES_USER: corralon
+      POSTGRES_PASSWORD: "1234567890"
+    ports:
+      # Si ya tenés un PostgreSQL local ocupando el 5432, exportá
+      # DB_HOST_PORT=5433 (o el que quieras) antes de `docker compose up`
+      # y ajustá el puerto en tu .env.
+      - "${DB_HOST_PORT:-5432}:5432"
+    volumes:
+      - corralon_pgdata:/var/lib/postgresql/data
+      # SQL opcional que se ejecuta la PRIMERA vez que se crea el volumen
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U corralon -d corralonDB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  corralon_pgdata:
