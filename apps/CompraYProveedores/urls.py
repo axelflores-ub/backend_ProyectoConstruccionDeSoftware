@@ -5,4 +5,29 @@
 # router.register("recurso", RecursoViewSet, basename="recurso")
 # urlpatterns = router.urls
 
-urlpatterns = []
+"""Router del módulo. Prefijo /api/compras/ en config/urls.py."""
+
+from rest_framework.routers import DefaultRouter
+
+from .views import (
+    EstadoOrdenCompraViewSet,
+    OrdenCompraDetalleViewSet,
+    OrdenCompraViewSet,
+    ProveedorViewSet,
+)
+
+router = DefaultRouter()
+router.register("proveedores", ProveedorViewSet, basename="proveedor")
+router.register(
+    "estados-orden-compra",
+    EstadoOrdenCompraViewSet,
+    basename="estado-orden-compra",
+)
+router.register("ordenes-compra", OrdenCompraViewSet, basename="orden-compra")
+router.register(
+    "ordenes-compra-detalle",
+    OrdenCompraDetalleViewSet,
+    basename="orden-compra-detalle",
+)
+
+urlpatterns = router.urls
