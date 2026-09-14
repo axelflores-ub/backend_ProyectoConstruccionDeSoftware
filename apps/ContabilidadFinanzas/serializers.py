@@ -1,6 +1,7 @@
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
+from rest_framework.validators import UniqueTogetherValidator
 
 from .models import CierreMensual, Diario, FacturaCabecera, FacturaDetalle, Periodo
 
@@ -9,6 +10,13 @@ class PeriodoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Periodo
         fields = ["id", "anio", "mes"]
+        validators = [
+            UniqueTogetherValidator(
+                queryset=Periodo.objects.all(),
+                fields=["anio", "mes"],
+                message="Ya existe un período para ese año y mes.",
+            )
+        ]
 
     def validate_mes(self, value):
         if not 1 <= value <= 12:
