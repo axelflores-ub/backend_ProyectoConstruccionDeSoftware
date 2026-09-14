@@ -24,44 +24,29 @@ from apps.CompraYProveedores.models import (
 
 @pytest.fixture
 def api_client():
-    """Fixture que proporciona un cliente API REST para pruebas sin autenticacion."""
     return APIClient()
 
 
 @pytest.fixture
 def usuario(db):
-    """Fixture que crea un usuario de prueba (username: 'tester', password: 'tester123')."""
     User = get_user_model()
     return User.objects.create_user(username="tester", password="tester123")
 
 
 @pytest.fixture
 def auth_client(api_client, usuario):
-    """Fixture que proporciona un cliente API REST autenticado con el usuario de prueba."""
     api_client.force_authenticate(user=usuario)
     return api_client
 
 
 @pytest.mark.django_db
 def test_proveedores_sin_token_da_401(api_client):
-    """Prueba que verifica que acceder a /api/compras/proveedores/ sin JWT retorna 401 Unauthorized.
-    
-    Valida que los endpoints estan protegidos y requieren autenticacion.
-    """
     response = api_client.get("/api/compras/proveedores/")
     assert response.status_code == 401
 
 
 @pytest.mark.django_db
 def test_crear_y_listar_proveedor(auth_client):
-    """Prueba CRUD de Proveedor: crear un proveedor y listar que aparece en el listado.
-    
-    Valida:
-    - POST /api/compras/proveedores/ retorna 201 Created
-    - Respuesta contiene proveedor_id
-    - Datos creados coinciden (CUIT)
-    - GET /api/compras/proveedores/ retorna listado con al menos 1 proveedor
-    """
     alta = auth_client.post(
         "/api/compras/proveedores/",
         {
@@ -71,12 +56,12 @@ def test_crear_y_listar_proveedor(auth_client):
             "email": "test@corralon.test",
             "cuit": "30712345678",
             "direccion": "Calle 1",
+            "producto_id": 1,
         },
         format="json",
     )
     assert alta.status_code == 201
-    assert "proveedor_id" in alta.data
-    assert alta.data["cuit"] == "30712345678"
+    assert alta.data["producto_id"] == 1
 
     listado = auth_client.get("/api/compras/proveedores/")
     assert listado.status_code == 200
@@ -84,17 +69,17 @@ def test_crear_y_listar_proveedor(auth_client):
 
 
 @pytest.mark.django_db
+def test_proveedor_sin_datos_mensajes_claros(auth_client):
+    response = auth_client.post("/api/compras/proveedores/", {}, format="json")
+    assert response.status_code == 400
+    assert "Falta completar el nombre." in str(response.data.get("nombre", []))
+    assert "Falta completar el apellido." in str(response.data.get("apellido", []))
+    assert "Falta completar el CUIT." in str(response.data.get("cuit", []))
+    assert "producto_id" in response.data
+
+
+@pytest.mark.django_db
 def test_flujo_orden_compra_con_detalle(auth_client):
-    """Prueba del flujo completo: crear estado, proveedor, orden y detalles.
-    
-    Valida el proceso end-to-end:
-    1. POST /api/compras/estados-orden-compra/ - crear estado "Pendiente"
-    2. POST /api/compras/proveedores/ - crear proveedor
-    3. POST /api/compras/ordenes-compra/ - crear orden con ese proveedor y estado
-    4. POST /api/compras/ordenes-compra-detalle/ - agregar renglon a la orden
-    5. GET /api/compras/ordenes-compra/{id}/ - verificar que el detalle aparece anidado
-    6. Validaciones finales de consistencia en base de datos
-    """
     estado = auth_client.post(
         "/api/compras/estados-orden-compra/",
         {"nombre": "Pendiente"},
@@ -106,17 +91,17 @@ def test_flujo_orden_compra_con_detalle(auth_client):
         "/api/compras/proveedores/",
         {
             "nombre": "Proveedor OC",
-            "apellido": "",
+            "apellido": "SA",
             "telefono": "",
             "email": "",
             "cuit": "20111222333",
             "direccion": "",
+            "producto_id": 2,
         },
         format="json",
     )
     assert proveedor.status_code == 201
-
-    orden = auth_client.post(
+    oc = auth_client.post(
         "/api/compras/ordenes-compra/",
         {
             "proveedor": proveedor.data["proveedor_id"],
@@ -126,14 +111,14 @@ def test_flujo_orden_compra_con_detalle(auth_client):
         },
         format="json",
     )
-    assert orden.status_code == 201
-    oc_id = orden.data["ordencompra_id"]
+    assert oc.status_code == 201
+    oc_id = oc.data["ordencompra_id"]
 
     detalle = auth_client.post(
         "/api/compras/ordenes-compra-detalle/",
         {
             "orden_compra": oc_id,
-            "producto_id": 1,
+            "producto_id": 2,
             "cantidad": 10,
             "precio_unitario": "1500.00",
         },
@@ -144,7 +129,7 @@ def test_flujo_orden_compra_con_detalle(auth_client):
     detalle_get = auth_client.get(f"/api/compras/ordenes-compra/{oc_id}/")
     assert detalle_get.status_code == 200
     assert len(detalle_get.data["detalles"]) == 1
-    assert OrdenCompraDetalle.objects.filter(orden_compra_id=oc_id).count() == 1
     assert OrdenCompra.objects.count() == 1
     assert Proveedor.objects.filter(nombre="Proveedor OC").exists()
     assert EstadoOrdenCompra.objects.filter(nombre="Pendiente").exists()
+    assert OrdenCompraDetalle.objects.filter(orden_compra_id=oc_id).count() == 1
