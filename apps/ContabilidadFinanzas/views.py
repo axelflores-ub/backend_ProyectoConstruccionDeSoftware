@@ -1,8 +1,8 @@
 from rest_framework import mixins
 from rest_framework.viewsets import GenericViewSet
 
-from .models import CierreMensual, Periodo
-from .serializers import CierreMensualSerializer, PeriodoSerializer
+from .models import CierreMensual, Diario, Periodo
+from .serializers import CierreMensualSerializer, DiarioSerializer, PeriodoSerializer
 
 
 class PeriodoViewSet(
@@ -29,3 +29,14 @@ class CierreMensualViewSet(
     http_method_names = ["get", "put", "head", "options"]
     search_fields = ["estado"]
     ordering_fields = ["periodo__anio", "periodo__mes", "estado", "fecha_cierre"]
+
+
+class DiarioViewSet(
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    GenericViewSet,
+):
+    queryset = Diario.objects.select_related("cierre_mensual__periodo")
+    serializer_class = DiarioSerializer
+    search_fields = ["descripcion"]
+    ordering_fields = ["fecha"]
