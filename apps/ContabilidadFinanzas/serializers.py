@@ -28,11 +28,13 @@ class CierreMensualSerializer(serializers.ModelSerializer):
     class Meta:
         model = CierreMensual
         fields = ["id", "periodo", "fecha_cierre", "estado"]
-        read_only_fields = ["fecha_cierre"]
+        read_only_fields = ["periodo", "fecha_cierre"]
+        extra_kwargs = {"estado": {"required": True}}
 
     def validate(self, attrs):
-        estado = attrs.get("estado", getattr(self.instance, "estado", None))
-        if estado == CierreMensual.Estado.CERRADO and not attrs.get("fecha_cierre"):
+        if self.instance and self.instance.estado == CierreMensual.Estado.CERRADO:
+            raise serializers.ValidationError("El período ya está cerrado y no se puede modificar.")
+        if attrs["estado"] == CierreMensual.Estado.CERRADO:
             attrs["fecha_cierre"] = timezone.now()
         return attrs
 
