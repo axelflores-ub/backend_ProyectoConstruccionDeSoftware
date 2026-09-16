@@ -91,10 +91,75 @@ def test_crear_periodo_sin_autenticacion_falla():
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize("metodo", ["put", "patch", "delete"])
-def test_modificar_o_borrar_periodo_no_permitido(api_client, metodo):
+@pytest.mark.parametrize("metodo", ["patch", "delete"])
+def test_modificar_parcial_o_borrar_periodo_no_permitido(api_client, metodo):
     periodo = Periodo.objects.create(anio=2026, mes=5)
 
     response = getattr(api_client, metodo)(f"/api/contabilidad/periodos/{periodo.id}/")
 
     assert response.status_code == 405
+
+
+@pytest.mark.django_db
+def test_actualizar_periodo_happy_path(api_client):
+    periodo = Periodo.objects.create(anio=2026, mes=6)
+
+    response = api_client.put(
+        f"/api/contabilidad/periodos/{periodo.id}/", {"anio": 2026, "mes": 7}
+    )
+
+    assert response.status_code == 200
+    periodo.refresh_from_db()
+    assert (periodo.anio, periodo.mes) == (2026, 7)
+    assert response.data == {"id": periodo.id, "anio": 2026, "mes": 7}
+
+
+@pytest.mark.django_db
+def test_actualizar_periodo_duplicado_falla(api_client):
+    Periodo.objects.create(anio=2026, mes=8)
+    periodo = Periodo.objects.create(anio=2026, mes=9)
+
+    response = api_client.put(
+        f"/api/contabilidad/periodos/{periodo.id}/", {"anio": 2026, "mes": 8}
+    )
+
+    assert response.status_code == 400
+    assert "Ya existe un período para ese año y mes." in response.data["non_field_errors"]
+    periodo.refresh_from_db()
+    assert periodo.mes == 9
+
+
+@pytest.mark.django_db
+def test_actualizar_periodo_mes_fuera_de_rango_falla(api_client):
+    periodo = Periodo.objects.create(anio=2026, mes=10)
+
+    response = api_client.put(
+        f"/api/contabilidad/periodos/{periodo.id}/", {"anio": 2026, "mes": 13}
+    )
+
+    assert response.status_code == 400
+    assert "mes" in response.data
+    periodo.refresh_from_db()
+    assert periodo.mes == 10
+
+
+@pytest.mark.django_db
+def test_actualizar_periodo_sin_autenticacion_falla():
+    periodo = Periodo.objects.create(anio=2026, mes=11)
+
+    response = APIClient().put(
+        f"/api/contabilidad/periodos/{periodo.id}/", {"anio": 2026, "mes": 12}
+    )
+
+    assert response.status_code == 401
+    periodo.refresh_from_db()
+    assert periodo.mes == 11
+
+
+@pytest.mark.django_db
+def test_actualizar_periodo_inexistente_da_404(api_client):
+    response = api_client.put(
+        "/api/contabilidad/periodos/9999/", {"anio": 2026, "mes": 12}
+    )
+
+    assert response.status_code == 404

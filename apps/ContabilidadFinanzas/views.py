@@ -9,10 +9,13 @@ class PeriodoViewSet(
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.CreateModelMixin,
+    mixins.UpdateModelMixin,
     GenericViewSet,
 ):
     queryset = Periodo.objects.all()
     serializer_class = PeriodoSerializer
+    # Sin PATCH: el período se actualiza enviando anio y mes completos.
+    http_method_names = ["get", "post", "put", "head", "options"]
     search_fields = ["anio", "mes"]
     ordering_fields = ["anio", "mes"]
 
