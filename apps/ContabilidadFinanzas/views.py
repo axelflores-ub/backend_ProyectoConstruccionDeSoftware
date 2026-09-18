@@ -1,8 +1,13 @@
 from rest_framework import mixins
 from rest_framework.viewsets import GenericViewSet
 
-from .models import CierreMensual, Diario, Periodo
-from .serializers import CierreMensualSerializer, DiarioSerializer, PeriodoSerializer
+from .models import CierreMensual, Diario, FacturaCabecera, Periodo
+from .serializers import (
+    CierreMensualSerializer,
+    DiarioSerializer,
+    FacturaCabeceraSerializer,
+    PeriodoSerializer,
+)
 
 
 class PeriodoViewSet(
@@ -43,3 +48,17 @@ class DiarioViewSet(
     serializer_class = DiarioSerializer
     search_fields = ["descripcion"]
     ordering_fields = ["fecha"]
+
+
+class FacturaCabeceraViewSet(
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.CreateModelMixin,
+    GenericViewSet,
+):
+    queryset = FacturaCabecera.objects.prefetch_related("detalles")
+    serializer_class = FacturaCabeceraSerializer
+    # Sin PUT/PATCH/DELETE: una factura emitida no se modifica ni se borra.
+    http_method_names = ["get", "post", "head", "options"]
+    search_fields = ["numero", "tipo"]
+    ordering_fields = ["fecha", "numero", "total"]
