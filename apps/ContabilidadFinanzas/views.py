@@ -1,5 +1,8 @@
 from rest_framework import mixins
+from rest_framework.authentication import SessionAuthentication
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.viewsets import GenericViewSet
+from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from .models import CierreMensual, Diario, FacturaCabecera, FacturaDetalle, Periodo
 from .serializers import (
@@ -11,12 +14,19 @@ from .serializers import (
 )
 
 
+class ContabilidadViewSet(GenericViewSet):
+    """Base de todos los endpoints del módulo: exige usuario autenticado (JWT o sesión)."""
+
+    authentication_classes = [JWTAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+
 class PeriodoViewSet(
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.CreateModelMixin,
     mixins.UpdateModelMixin,
-    GenericViewSet,
+    ContabilidadViewSet,
 ):
     queryset = Periodo.objects.all()
     serializer_class = PeriodoSerializer
@@ -30,7 +40,7 @@ class CierreMensualViewSet(
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.UpdateModelMixin,
-    GenericViewSet,
+    ContabilidadViewSet,
 ):
     queryset = CierreMensual.objects.select_related("periodo")
     serializer_class = CierreMensualSerializer
@@ -43,7 +53,7 @@ class CierreMensualViewSet(
 class DiarioViewSet(
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
-    GenericViewSet,
+    ContabilidadViewSet,
 ):
     queryset = Diario.objects.select_related("cierre_mensual__periodo")
     serializer_class = DiarioSerializer
@@ -55,7 +65,7 @@ class FacturaCabeceraViewSet(
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.CreateModelMixin,
-    GenericViewSet,
+    ContabilidadViewSet,
 ):
     queryset = FacturaCabecera.objects.prefetch_related("detalles")
     serializer_class = FacturaCabeceraSerializer
@@ -69,7 +79,7 @@ class FacturaDetalleViewSet(
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.CreateModelMixin,
-    GenericViewSet,
+    ContabilidadViewSet,
 ):
     queryset = FacturaDetalle.objects.select_related("factura")
     serializer_class = FacturaDetalleConFacturaSerializer
