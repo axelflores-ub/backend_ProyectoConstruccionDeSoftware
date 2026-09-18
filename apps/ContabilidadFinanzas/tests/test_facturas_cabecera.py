@@ -4,7 +4,6 @@ from faker import Faker
 from rest_framework.test import APIClient
 
 from apps.ContabilidadFinanzas.models import (
-    CierreMensual,
     Diario,
     FacturaCabecera,
     FacturaDetalle,
@@ -25,7 +24,7 @@ def api_client(db):
 @pytest.fixture
 def diario(db):
     periodo = Periodo.objects.create(anio=2026, mes=1)
-    cierre_mensual = CierreMensual.objects.create(periodo=periodo)
+    cierre_mensual = periodo.cierres_mensuales.get()
     return Diario.objects.create(cierre_mensual=cierre_mensual, fecha="2026-01-10T10:00:00Z")
 
 

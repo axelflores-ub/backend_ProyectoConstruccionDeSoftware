@@ -1,4 +1,4 @@
-from django.db import models
+from django.db import models, transaction
 
 
 class Periodo(models.Model):
@@ -16,6 +16,14 @@ class Periodo(models.Model):
 
     def __str__(self):
         return f"{self.mes:02d}/{self.anio}"
+
+    def save(self, *args, **kwargs):
+        es_nuevo = self._state.adding
+        with transaction.atomic():
+            super().save(*args, **kwargs)
+            if es_nuevo:
+                # Todo período nace con su cierre abierto.
+                CierreMensual.objects.create(periodo=self)
 
 
 class CierreMensual(models.Model):

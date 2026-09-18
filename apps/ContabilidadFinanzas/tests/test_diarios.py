@@ -3,7 +3,7 @@ from django.contrib.auth import get_user_model
 from faker import Faker
 from rest_framework.test import APIClient
 
-from apps.ContabilidadFinanzas.models import CierreMensual, Diario, Periodo
+from apps.ContabilidadFinanzas.models import Diario, Periodo
 
 fake = Faker()
 
@@ -19,7 +19,7 @@ def api_client(db):
 @pytest.fixture
 def cierre_mensual(db):
     periodo = Periodo.objects.create(anio=2026, mes=1)
-    return CierreMensual.objects.create(periodo=periodo)
+    return periodo.cierres_mensuales.get()
 
 
 @pytest.mark.django_db
