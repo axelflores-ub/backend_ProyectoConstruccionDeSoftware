@@ -1,11 +1,12 @@
 from rest_framework import mixins
 from rest_framework.viewsets import GenericViewSet
 
-from .models import CierreMensual, Diario, FacturaCabecera, Periodo
+from .models import CierreMensual, Diario, FacturaCabecera, FacturaDetalle, Periodo
 from .serializers import (
     CierreMensualSerializer,
     DiarioSerializer,
     FacturaCabeceraSerializer,
+    FacturaDetalleConFacturaSerializer,
     PeriodoSerializer,
 )
 
@@ -62,3 +63,24 @@ class FacturaCabeceraViewSet(
     http_method_names = ["get", "post", "head", "options"]
     search_fields = ["numero", "tipo"]
     ordering_fields = ["fecha", "numero", "total"]
+
+
+class FacturaDetalleViewSet(
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.CreateModelMixin,
+    GenericViewSet,
+):
+    queryset = FacturaDetalle.objects.select_related("factura")
+    serializer_class = FacturaDetalleConFacturaSerializer
+    # Sin PUT/PATCH/DELETE: un detalle emitido no se modifica ni se borra.
+    http_method_names = ["get", "post", "head", "options"]
+    ordering_fields = ["id", "cantidad", "precio_unitario", "subtotal"]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        # ?factura=<id> para traer solo las líneas de una factura.
+        factura_id = self.request.query_params.get("factura", "")
+        if factura_id.isdigit():
+            queryset = queryset.filter(factura_id=factura_id)
+        return queryset

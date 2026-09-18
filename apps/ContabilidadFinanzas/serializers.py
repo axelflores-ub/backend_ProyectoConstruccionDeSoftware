@@ -53,6 +53,8 @@ class DiarioSerializer(serializers.ModelSerializer):
 
 
 class FacturaDetalleSerializer(serializers.ModelSerializer):
+    """Detalle anidado dentro de la factura: la factura la pone el serializer padre."""
+
     class Meta:
         model = FacturaDetalle
         fields = ["id", "producto_id", "cantidad", "precio_unitario", "subtotal"]
@@ -62,6 +64,24 @@ class FacturaDetalleSerializer(serializers.ModelSerializer):
         if value <= 0:
             raise serializers.ValidationError("La cantidad debe ser mayor a cero.")
         return value
+
+
+class FacturaDetalleConFacturaSerializer(FacturaDetalleSerializer):
+    """Detalle como recurso propio: hay que indicar a qué factura pertenece."""
+
+    class Meta(FacturaDetalleSerializer.Meta):
+        fields = ["id", "factura", "producto_id", "cantidad", "precio_unitario", "subtotal"]
+
+    @transaction.atomic
+    def create(self, validated_data):
+        detalle = FacturaDetalle(**validated_data)
+        detalle.recalcular_subtotal()
+        detalle.save()
+        # Al sumar una línea cambian los totales de la cabecera.
+        factura = detalle.factura
+        factura.recalcular_totales()
+        factura.save(update_fields=["subtotal", "total"])
+        return detalle
 
 
 class FacturaCabeceraSerializer(serializers.ModelSerializer):
