@@ -29,7 +29,7 @@ urlpatterns = [
     # --- Módulos del negocio (descomentar cuando cada uno tenga su router) ---
     # path("api/core/", include("apps.core.urls")),
     path("api/compras/", include("apps.CompraYProveedores.urls")),
-    # path("api/ventas/", include("apps.Ventas.urls")),
+    path("api/ventas/", include("apps.Ventas.urls")),
     # path("api/scm/", include("apps.SCM.urls")),
     path("api/contabilidad/", include("apps.ContabilidadFinanzas.urls")),
 ]
