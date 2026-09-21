@@ -30,6 +30,8 @@ Table producto {
   descripcion varchar(255)
   precio decimal(12,2) [not null]
   rubro_id int [ref: > rubro.id]
+  stock_actual int [not null, default: 0]
+  stock_minimo int [not null, default: 0]
 }
 
 Table movimiento_inventario {

@@ -80,12 +80,8 @@ def test_proveedor_sin_datos_mensajes_claros(auth_client):
 
 @pytest.mark.django_db
 def test_flujo_orden_compra_con_detalle(auth_client):
-    estado = auth_client.post(
-        "/api/compras/estados-orden-compra/",
-        {"nombre": "Pendiente"},
-        format="json",
-    )
-    assert estado.status_code == 201
+    # "Pendiente" ya viene cargado por la migración 0003.
+    estado = EstadoOrdenCompra.objects.get(nombre="Pendiente")
 
     proveedor = auth_client.post(
         "/api/compras/proveedores/",
@@ -105,7 +101,7 @@ def test_flujo_orden_compra_con_detalle(auth_client):
         "/api/compras/ordenes-compra/",
         {
             "proveedor": proveedor.data["proveedor_id"],
-            "estado": estado.data["estadoordencompra_id"],
+            "estado": estado.estadoordencompra_id,
             "fecha": "2026-09-04T10:00:00-03:00",
             "total": "15000.00",
         },

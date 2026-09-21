@@ -10,6 +10,18 @@ Define las estructuras de datos (tablas de base de datos) para gestionar:
 
 from django.db import models
 
+# Estados del catálogo estado_orden_compra (los carga la migración 0003).
+ESTADO_PENDIENTE = "Pendiente"
+ESTADO_APROBADA = "Aprobada"
+ESTADO_RECHAZADA = "Rechazada"
+ESTADO_RECIBIDA = "Recibida"
+ESTADOS_ORDEN_COMPRA = [
+    ESTADO_PENDIENTE,
+    ESTADO_APROBADA,
+    ESTADO_RECHAZADA,
+    ESTADO_RECIBIDA,
+]
+
 
 class Proveedor(models.Model):
     proveedor_id = models.AutoField(primary_key=True)
