@@ -31,9 +31,7 @@ def registrar_movimiento(
 
     nuevo_stock = producto.stock_actual + _delta_stock(tipo, cantidad)
     if nuevo_stock < 0:
-        raise serializers.ValidationError(
-            {"cantidad": "Stock insuficiente para este movimiento."}
-        )
+        raise serializers.ValidationError({"cantidad": "Stock insuficiente para este movimiento."})
 
     producto.stock_actual = nuevo_stock
     producto.save(update_fields=["stock_actual"])

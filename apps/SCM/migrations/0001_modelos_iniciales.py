@@ -6,7 +6,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     initial = True
 
     dependencies = [
@@ -15,58 +14,104 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.CreateModel(
-            name='Producto',
+            name="Producto",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('codigo', models.CharField(max_length=50, unique=True)),
-                ('nombre', models.CharField(max_length=150)),
-                ('descripcion', models.CharField(blank=True, max_length=255)),
-                ('precio', models.DecimalField(decimal_places=2, max_digits=12)),
-                ('stock_actual', models.IntegerField(default=0)),
-                ('stock_minimo', models.IntegerField(default=0)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                ("codigo", models.CharField(max_length=50, unique=True)),
+                ("nombre", models.CharField(max_length=150)),
+                ("descripcion", models.CharField(blank=True, max_length=255)),
+                ("precio", models.DecimalField(decimal_places=2, max_digits=12)),
+                ("stock_actual", models.IntegerField(default=0)),
+                ("stock_minimo", models.IntegerField(default=0)),
             ],
             options={
-                'verbose_name': 'Producto',
-                'verbose_name_plural': 'Productos',
-                'db_table': 'producto',
-                'ordering': ['nombre'],
+                "verbose_name": "Producto",
+                "verbose_name_plural": "Productos",
+                "db_table": "producto",
+                "ordering": ["nombre"],
             },
         ),
         migrations.CreateModel(
-            name='Rubro',
+            name="Rubro",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('nombre', models.CharField(max_length=100)),
-                ('descripcion', models.CharField(blank=True, max_length=200)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                ("nombre", models.CharField(max_length=100)),
+                ("descripcion", models.CharField(blank=True, max_length=200)),
             ],
             options={
-                'verbose_name': 'Rubro',
-                'verbose_name_plural': 'Rubros',
-                'db_table': 'rubro',
-                'ordering': ['nombre'],
+                "verbose_name": "Rubro",
+                "verbose_name_plural": "Rubros",
+                "db_table": "rubro",
+                "ordering": ["nombre"],
             },
         ),
         migrations.CreateModel(
-            name='MovimientoInventario',
+            name="MovimientoInventario",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('tipo', models.CharField(choices=[('ENTRADA', 'Entrada'), ('SALIDA', 'Salida'), ('AJUSTE', 'Ajuste'), ('DEVOLUCION', 'Devolución')], max_length=20)),
-                ('cantidad', models.IntegerField()),
-                ('fecha', models.DateTimeField(auto_now_add=True)),
-                ('observacion', models.CharField(blank=True, max_length=255)),
-                ('usuario', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='movimientos_inventario', to=settings.AUTH_USER_MODEL)),
-                ('producto', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='movimientos', to='scm.producto')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                (
+                    "tipo",
+                    models.CharField(
+                        choices=[
+                            ("ENTRADA", "Entrada"),
+                            ("SALIDA", "Salida"),
+                            ("AJUSTE", "Ajuste"),
+                            ("DEVOLUCION", "Devolución"),
+                        ],
+                        max_length=20,
+                    ),
+                ),
+                ("cantidad", models.IntegerField()),
+                ("fecha", models.DateTimeField(auto_now_add=True)),
+                ("observacion", models.CharField(blank=True, max_length=255)),
+                (
+                    "usuario",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="movimientos_inventario",
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
+                (
+                    "producto",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="movimientos",
+                        to="scm.producto",
+                    ),
+                ),
             ],
             options={
-                'verbose_name': 'Movimiento de inventario',
-                'verbose_name_plural': 'Movimientos de inventario',
-                'db_table': 'movimiento_inventario',
-                'ordering': ['-fecha', '-id'],
+                "verbose_name": "Movimiento de inventario",
+                "verbose_name_plural": "Movimientos de inventario",
+                "db_table": "movimiento_inventario",
+                "ordering": ["-fecha", "-id"],
             },
         ),
         migrations.AddField(
-            model_name='producto',
-            name='rubro',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name='productos', to='scm.rubro'),
+            model_name="producto",
+            name="rubro",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.PROTECT,
+                related_name="productos",
+                to="scm.rubro",
+            ),
         ),
     ]

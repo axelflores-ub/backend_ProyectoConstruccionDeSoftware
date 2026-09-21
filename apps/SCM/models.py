@@ -58,9 +58,7 @@ class MovimientoInventario(models.Model):
         AJUSTE = "AJUSTE", "Ajuste"
         DEVOLUCION = "DEVOLUCION", "Devolución"
 
-    producto = models.ForeignKey(
-        Producto, on_delete=models.PROTECT, related_name="movimientos"
-    )
+    producto = models.ForeignKey(Producto, on_delete=models.PROTECT, related_name="movimientos")
     usuario = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,

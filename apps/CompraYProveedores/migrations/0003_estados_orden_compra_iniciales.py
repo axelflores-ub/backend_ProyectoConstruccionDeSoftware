@@ -10,7 +10,6 @@ def cargar_estados(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("compra_y_proveedores", "0002_proveedor_producto_id"),
     ]

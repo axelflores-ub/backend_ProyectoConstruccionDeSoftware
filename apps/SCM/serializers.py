@@ -67,11 +67,7 @@ class MovimientoInventarioSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         tipo = attrs.get("tipo")
         cantidad = attrs.get("cantidad")
-        if (
-            tipo != MovimientoInventario.Tipo.AJUSTE
-            and cantidad is not None
-            and cantidad < 0
-        ):
+        if tipo != MovimientoInventario.Tipo.AJUSTE and cantidad is not None and cantidad < 0:
             raise serializers.ValidationError(
                 {"cantidad": "Solo los ajustes admiten cantidad negativa."}
             )
