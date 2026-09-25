@@ -25,13 +25,9 @@ from .serializers import (
 class ClienteListView(APIView):
     """
     GET /api/clientes/  -> Lista todos los clientes.
-
-    Sin permission_classes propio a propósito: hereda el default global
-    IsAuthenticated (ver settings.REST_FRAMEWORK), así que exige login
-    incluso para leer. Es la única vista del módulo con ese criterio más
-    estricto (el resto usa IsAuthenticatedOrReadOnly), tal cual estaba
-    en el código original.
     """
+    permission_classes = [IsAuthenticatedOrReadOnly]
+    serializer_class = ClienteSerializer
 
     def get(self, request):
         clientes = Cliente.objects.all()
@@ -45,6 +41,8 @@ class ClienteDetailView(APIView):
     PUT    /api/clientes/<id_cliente>/  -> Actualiza un cliente por id_cliente.
     DELETE /api/clientes/<id_cliente>/  -> Baja lógica: setea estado = 'OF'.
     """
+    permission_classes = [IsAuthenticatedOrReadOnly]
+    serializer_class = ClienteSerializer
 
     def get_object(self, id_cliente):
         return get_object_or_404(Cliente, id_cliente=id_cliente)
@@ -56,8 +54,7 @@ class ClienteDetailView(APIView):
 
     def put(self, request, id_cliente):
         cliente = self.get_object(id_cliente)
-        serializer = ClienteSerializer(cliente, data=request.data,
-partial=False)
+        serializer = ClienteSerializer(cliente, data=request.data, partial=False)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_200_OK)
