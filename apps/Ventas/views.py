@@ -8,10 +8,13 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 
-from .models import Cliente, EstadoOrdenVenta, OrdenVenta, OrdenVentaDetalle, Producto
+from .models import Anulacion, Cliente, DetalleNotaCredito, EstadoOrdenVenta, NotaCredito, OrdenVenta, OrdenVentaDetalle, Producto
 from .serializers import (
+    AnulacionSerializer,
     ClienteSerializer,
+    DetalleNotaCreditoSerializer,
     EstadoOrdenVentaSerializer,
+    NotaCreditoSerializer,
     OrdenVentaDetalleSerializer,
     OrdenVentaSerializer,
     OrdenVentaUpdateSerializer,
@@ -116,5 +119,37 @@ class OrdenVentaDetalleViewSet(viewsets.ModelViewSet):
 
     queryset = OrdenVentaDetalle.objects.select_related("orden_venta", "producto")
     serializer_class = OrdenVentaDetalleSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
+    http_method_names = ["get", "head", "options"]
+
+
+class AnulacionViewSet(viewsets.ModelViewSet):
+    """Anular una orden de venta (Devoluciones -> botón 'Anular').
+    Solo lectura + alta: una anulación, una vez creada, no se edita ni se
+    borra (es un registro de auditoría)."""
+
+    queryset = Anulacion.objects.select_related("orden_venta")
+    serializer_class = AnulacionSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
+    http_method_names = ["get", "post", "head", "options"]
+
+
+class NotaCreditoViewSet(viewsets.ModelViewSet):
+    """Alta de una nota de crédito (devolución parcial/total). Repone stock
+    para los ítems marcados como 'stock disponible' y mueve la orden a
+    'Devolución parcial'. No se edita ni se borra una vez creada."""
+
+    queryset = NotaCredito.objects.select_related("orden_venta").prefetch_related("detalles")
+    serializer_class = NotaCreditoSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
+    http_method_names = ["get", "post", "head", "options"]
+
+
+class DetalleNotaCreditoViewSet(viewsets.ModelViewSet):
+    """Consulta del detalle de notas de crédito. Solo lectura: el detalle
+    se crea automáticamente junto con la nota de crédito."""
+
+    queryset = DetalleNotaCredito.objects.select_related("nota_credito", "producto")
+    serializer_class = DetalleNotaCreditoSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
     http_method_names = ["get", "head", "options"]

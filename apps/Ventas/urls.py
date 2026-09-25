@@ -2,9 +2,12 @@ from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from .views import (
+    AnulacionViewSet,
     ClienteDetailView,
     ClienteListView,
+    DetalleNotaCreditoViewSet,
     EstadoOrdenVentaViewSet,
+    NotaCreditoViewSet,
     OrdenVentaDetalleViewSet,
     OrdenVentaViewSet,
     ProductoViewSet,
@@ -34,6 +37,24 @@ router.register(
     "ordenes-venta-detalle",
     OrdenVentaDetalleViewSet,
     basename="ordenventadetalle"
+)
+
+router.register(
+    "anulaciones",
+    AnulacionViewSet,
+    basename="anulacion"
+)
+
+router.register(
+    "notas-credito",
+    NotaCreditoViewSet,
+    basename="notacredito"
+)
+
+router.register(
+    "notas-credito-detalle",
+    DetalleNotaCreditoViewSet,
+    basename="detallenotacredito"
 )
 
 urlpatterns = [

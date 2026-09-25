@@ -4,7 +4,16 @@ from decimal import Decimal
 from django.db import transaction
 from rest_framework import serializers
 
-from .models import Cliente, EstadoOrdenVenta, OrdenVenta, OrdenVentaDetalle, Producto
+from .models import (
+    Anulacion,
+    Cliente,
+    DetalleNotaCredito,
+    EstadoOrdenVenta,
+    NotaCredito,
+    OrdenVenta,
+    OrdenVentaDetalle,
+    Producto,
+)
 
 
 class ClienteSerializer(serializers.ModelSerializer):
@@ -15,7 +24,7 @@ class ClienteSerializer(serializers.ModelSerializer):
  
     class Meta:
         model = Cliente
-        fields = ['id_cliente', 'nombre', 'telefono', 'email', 'direccion', 'estado']
+        fields = ['id_cliente', 'nombre', 'telefono', 'email', 'direccion', 'cuil', 'condicion_iva', 'estado']
         read_only_fields = ['id_cliente']
 
 class ProductoSerializer(serializers.ModelSerializer):
@@ -35,6 +44,9 @@ class OrdenVentaDetalleInputSerializer(serializers.Serializer):
 
     producto = serializers.PrimaryKeyRelatedField(queryset=Producto.objects.all())
     cantidad = serializers.IntegerField(min_value=1)
+    descuento = serializers.DecimalField(
+        max_digits=12, decimal_places=2, required=False, default=Decimal("0"), min_value=Decimal("0")
+    )
 
 
 class OrdenVentaDetalleSerializer(serializers.ModelSerializer):
@@ -50,6 +62,7 @@ class OrdenVentaDetalleSerializer(serializers.ModelSerializer):
             "producto_nombre",
             "cantidad",
             "precio_unitario",
+            "descuento",
             "subtotal",
         ]
         read_only_fields = ["precio_unitario"]
@@ -68,6 +81,8 @@ class OrdenVentaSerializer(serializers.ModelSerializer):
             "id",
             "cliente",
             "forma_pago",
+            "numero_comprobante",
+            "tipo_comprobante",
             "estado",
             "estado_nombre",
             "fecha",
@@ -154,13 +169,15 @@ class OrdenVentaSerializer(serializers.ModelSerializer):
         for item in detalles_data:
             producto = productos_lockeados[item["producto"].id]
             cantidad = item["cantidad"]
+            descuento = item.get("descuento") or Decimal("0")
             OrdenVentaDetalle.objects.create(
                 orden_venta=orden,
                 producto=producto,
                 cantidad=cantidad,
                 precio_unitario=producto.precio,
+                descuento=descuento,
             )
-            total += producto.precio * cantidad
+            total += (producto.precio * cantidad) - descuento
 
         for producto_id, cantidad_total in cantidad_por_producto.items():
             producto = productos_lockeados[producto_id]
@@ -178,5 +195,90 @@ class OrdenVentaUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = OrdenVenta
-        fields = ["id", "cliente", "forma_pago", "estado", "fecha", "total"]
+        fields = ["id", "cliente", "forma_pago", "numero_comprobante", "tipo_comprobante", "estado", "fecha", "total"]
         read_only_fields = ["fecha", "total"]
+
+
+class AnulacionSerializer(serializers.ModelSerializer):
+    """Anula una orden de venta (botón 'Anular' en Devoluciones).
+    Al crearse, mueve la orden al estado 'Anulada'."""
+
+    class Meta:
+        model = Anulacion
+        fields = ["id", "orden_venta", "motivo", "detalle", "fecha"]
+        read_only_fields = ["fecha"]
+
+    def validate_orden_venta(self, orden_venta):
+        if hasattr(orden_venta, "anulacion"):
+            raise serializers.ValidationError("Esta orden ya fue anulada.")
+        return orden_venta
+
+    @transaction.atomic
+    def create(self, validated_data):
+        anulacion = Anulacion.objects.create(**validated_data)
+        estado_anulada, _ = EstadoOrdenVenta.objects.get_or_create(nombre="Anulada")
+        orden = validated_data["orden_venta"]
+        orden.estado = estado_anulada
+        orden.save(update_fields=["estado"])
+        return anulacion
+
+
+class DetalleNotaCreditoInputSerializer(serializers.Serializer):
+    """Ítems que llegan al registrar una nota de crédito (qué se devuelve)."""
+
+    producto = serializers.PrimaryKeyRelatedField(queryset=Producto.objects.all())
+    cantidad_devuelta = serializers.IntegerField(min_value=1)
+    destino = serializers.ChoiceField(choices=DetalleNotaCredito.Destino.choices)
+
+
+class DetalleNotaCreditoSerializer(serializers.ModelSerializer):
+    producto_nombre = serializers.CharField(source="producto.nombre", read_only=True)
+
+    class Meta:
+        model = DetalleNotaCredito
+        fields = [
+            "id",
+            "nota_credito",
+            "producto",
+            "producto_nombre",
+            "cantidad_devuelta",
+            "destino",
+        ]
+
+
+class NotaCreditoSerializer(serializers.ModelSerializer):
+    """Alta de una nota de crédito (devolución). Si el destino de un ítem
+    es 'stock disponible', repone ese stock al producto. Al crearse, mueve
+    la orden al estado 'Devolución parcial'."""
+
+    detalles = DetalleNotaCreditoInputSerializer(many=True, write_only=True)
+    items = DetalleNotaCreditoSerializer(source="detalles", many=True, read_only=True)
+
+    class Meta:
+        model = NotaCredito
+        fields = ["id", "orden_venta", "monto", "saldo_a_favor", "fecha", "detalles", "items"]
+        read_only_fields = ["fecha"]
+
+    def validate_detalles(self, detalles):
+        if not detalles:
+            raise serializers.ValidationError("La nota de crédito debe tener al menos un producto.")
+        return detalles
+
+    @transaction.atomic
+    def create(self, validated_data):
+        detalles_data = validated_data.pop("detalles")
+        nota_credito = NotaCredito.objects.create(**validated_data)
+
+        for item in detalles_data:
+            DetalleNotaCredito.objects.create(nota_credito=nota_credito, **item)
+            if item["destino"] == DetalleNotaCredito.Destino.STOCK_DISPONIBLE:
+                producto = Producto.objects.select_for_update().get(pk=item["producto"].id)
+                producto.stock += item["cantidad_devuelta"]
+                producto.save(update_fields=["stock"])
+
+        estado_devolucion, _ = EstadoOrdenVenta.objects.get_or_create(nombre="Devolución parcial")
+        orden = validated_data["orden_venta"]
+        orden.estado = estado_devolucion
+        orden.save(update_fields=["estado"])
+
+        return nota_credito

@@ -17,6 +17,14 @@ class Cliente(models.Model):
     telefono = models.CharField(max_length=50, db_column='telefono', blank=True, null=True)
     email = models.CharField(max_length=100, db_column='email', blank=True, null=True)
     direccion = models.CharField(max_length=200, db_column='direccion', blank=True, null=True)
+    cuil = models.CharField(
+        max_length=20, db_column='cuil', blank=True, null=True,
+        help_text="Para buscar al cliente por CUIL en Registrar venta.",
+    )
+    condicion_iva = models.CharField(
+        max_length=50, db_column='condicion_iva', blank=True, null=True,
+        help_text="Usado para sugerir el tipo de comprobante (A/B/C) automáticamente.",
+    )
     estado = models.CharField(max_length=2, db_column='estado', default=ESTADO_ACTIVO)
  
     class Meta:
@@ -62,8 +70,15 @@ class EstadoOrdenVenta(models.Model):
 class OrdenVenta(models.Model):
     class FormaPago(models.TextChoices):
         EFECTIVO = "EFECTIVO", "Efectivo"
-        TARJETA = "TARJETA", "Tarjeta"
+        DEBITO = "DEBITO", "Débito"
+        CREDITO = "CREDITO", "Crédito"
         TRANSFERENCIA = "TRANSFERENCIA", "Transferencia"
+
+    class TipoComprobante(models.TextChoices):
+        FACTURA_A = "FACTURA_A", "Factura A"
+        FACTURA_B = "FACTURA_B", "Factura B"
+        FACTURA_C = "FACTURA_C", "Factura C"
+        NOTA_VENTA = "NOTA_VENTA", "Nota de venta"
 
     cliente = models.ForeignKey(
         Cliente, on_delete=models.PROTECT, related_name="ordenes_venta"
@@ -79,6 +94,13 @@ class OrdenVenta(models.Model):
         EstadoOrdenVenta, on_delete=models.PROTECT, related_name="ordenes_venta"
     )
     forma_pago = models.CharField(max_length=20, choices=FormaPago.choices)
+    numero_comprobante = models.CharField(
+        max_length=20, blank=True, null=True, unique=True,
+        help_text='Ej: "B-0002145". Se muestra en el historial de Devoluciones.',
+    )
+    tipo_comprobante = models.CharField(
+        max_length=20, choices=TipoComprobante.choices, blank=True, null=True,
+    )
     fecha = models.DateTimeField(auto_now_add=True)
     total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
@@ -105,6 +127,7 @@ class OrdenVentaDetalle(models.Model):
     )
     cantidad = models.PositiveIntegerField()
     precio_unitario = models.DecimalField(max_digits=12, decimal_places=2)
+    descuento = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
     class Meta:
         verbose_name = "Detalle de orden de venta"
@@ -115,4 +138,68 @@ class OrdenVentaDetalle(models.Model):
 
     @property
     def subtotal(self):
-        return self.cantidad * self.precio_unitario
+        return (self.cantidad * self.precio_unitario) - self.descuento
+
+
+class Anulacion(models.Model):
+    """Se crea cuando se anula un comprobante desde la pantalla de
+    Devoluciones (botón 'Anular'). Al anularse, la orden pasa a estado
+    'Anulada'. Una orden solo puede anularse una vez."""
+
+    orden_venta = models.OneToOneField(
+        OrdenVenta, on_delete=models.CASCADE, related_name="anulacion"
+    )
+    motivo = models.CharField(max_length=100)
+    detalle = models.TextField(blank=True, null=True)
+    fecha = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Anulación"
+        verbose_name_plural = "Anulaciones"
+
+    def __str__(self):
+        return f"Anulación de orden #{self.orden_venta_id} - {self.motivo}"
+
+
+class NotaCredito(models.Model):
+    """Se genera al hacer una devolución (parcial o total) sobre una orden
+    de venta. Al crearse, la orden pasa a estado 'Devolución parcial'."""
+
+    orden_venta = models.ForeignKey(
+        OrdenVenta, on_delete=models.PROTECT, related_name="notas_credito"
+    )
+    monto = models.DecimalField(max_digits=12, decimal_places=2)
+    saldo_a_favor = models.BooleanField(default=False)
+    fecha = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Nota de crédito"
+        verbose_name_plural = "Notas de crédito"
+
+    def __str__(self):
+        return f"Nota de crédito #{self.pk} - Orden #{self.orden_venta_id}"
+
+
+class DetalleNotaCredito(models.Model):
+    """Qué productos y en qué cantidad se devolvieron dentro de una nota
+    de crédito."""
+
+    class Destino(models.TextChoices):
+        STOCK_DISPONIBLE = "STOCK_DISPONIBLE", "Stock disponible"
+        PRODUCTO_DANADO = "PRODUCTO_DANADO", "Producto dañado"
+
+    nota_credito = models.ForeignKey(
+        NotaCredito, on_delete=models.CASCADE, related_name="detalles"
+    )
+    producto = models.ForeignKey(
+        Producto, on_delete=models.PROTECT, related_name="detalles_nota_credito"
+    )
+    cantidad_devuelta = models.PositiveIntegerField()
+    destino = models.CharField(max_length=30, choices=Destino.choices)
+
+    class Meta:
+        verbose_name = "Detalle de nota de crédito"
+        verbose_name_plural = "Detalles de nota de crédito"
+
+    def __str__(self):
+        return f"{self.cantidad_devuelta} x {self.producto.nombre} ({self.destino})"
