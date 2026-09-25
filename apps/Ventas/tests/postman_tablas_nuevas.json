@@ -1,0 +1,213 @@
+{
+  "info": {
+    "name": "Ventas - Tablas nuevas (Anulacion / Nota de crédito)",
+    "description": "Colección solo para los endpoints de las tablas nuevas agregadas: anulaciones, notas-credito y notas-credito-detalle. Para el resto de los endpoints (clientes, productos, ordenes-venta, etc.) usá una colección aparte si la necesitás.\n\nAutenticación: los endpoints de escritura (POST) requieren estar autenticado (IsAuthenticatedOrReadOnly). Esta colección usa Basic Auth a nivel de colección con las variables {{usuario}} / {{password}}.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "basic",
+    "basic": [
+      { "key": "username", "value": "{{usuario}}", "type": "string" },
+      { "key": "password", "value": "{{password}}", "type": "string" }
+    ]
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8000/api/ventas", "type": "string" },
+    { "key": "usuario", "value": "", "type": "string" },
+    { "key": "password", "value": "", "type": "string" },
+    { "key": "orden_venta_id", "value": "1", "type": "string" },
+    { "key": "producto_id", "value": "1", "type": "string" },
+    { "key": "anulacion_id", "value": "1", "type": "string" },
+    { "key": "nota_credito_id", "value": "1", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Anulaciones",
+      "item": [
+        {
+          "name": "Listar anulaciones",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/anulaciones/",
+              "host": ["{{base_url}}"],
+              "path": ["anulaciones", ""]
+            }
+          }
+        },
+        {
+          "name": "Ver una anulación",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/anulaciones/{{anulacion_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["anulaciones", "{{anulacion_id}}", ""]
+            }
+          }
+        },
+        {
+          "name": "Anular una orden de venta",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orden_venta\": {{orden_venta_id}},\n  \"motivo\": \"Cliente se arrepintió\",\n  \"detalle\": \"Pidió cancelar por WhatsApp\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/anulaciones/",
+              "host": ["{{base_url}}"],
+              "path": ["anulaciones", ""]
+            },
+            "description": "Al crearse, mueve automáticamente la orden de venta al estado 'Anulada'. Devuelve 400 si la orden ya estaba anulada."
+          }
+        },
+        {
+          "name": "Anular la misma orden 2 veces (debe dar 400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orden_venta\": {{orden_venta_id}},\n  \"motivo\": \"Intento duplicado\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/anulaciones/",
+              "host": ["{{base_url}}"],
+              "path": ["anulaciones", ""]
+            },
+            "description": "Caso de error esperado: 400 Bad Request, 'Esta orden ya fue anulada.'"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Notas de crédito",
+      "item": [
+        {
+          "name": "Listar notas de crédito",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/notas-credito/",
+              "host": ["{{base_url}}"],
+              "path": ["notas-credito", ""]
+            }
+          }
+        },
+        {
+          "name": "Ver una nota de crédito",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/notas-credito/{{nota_credito_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["notas-credito", "{{nota_credito_id}}", ""]
+            }
+          }
+        },
+        {
+          "name": "Crear nota de crédito - devolución a stock disponible",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orden_venta\": {{orden_venta_id}},\n  \"monto\": \"100.00\",\n  \"saldo_a_favor\": false,\n  \"detalles\": [\n    {\n      \"producto\": {{producto_id}},\n      \"cantidad_devuelta\": 1,\n      \"destino\": \"STOCK_DISPONIBLE\"\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/notas-credito/",
+              "host": ["{{base_url}}"],
+              "path": ["notas-credito", ""]
+            },
+            "description": "Repone el stock del producto y mueve la orden a estado 'Devolución parcial'."
+          }
+        },
+        {
+          "name": "Crear nota de crédito - producto dañado (no repone stock)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orden_venta\": {{orden_venta_id}},\n  \"monto\": \"50.00\",\n  \"saldo_a_favor\": true,\n  \"detalles\": [\n    {\n      \"producto\": {{producto_id}},\n      \"cantidad_devuelta\": 1,\n      \"destino\": \"PRODUCTO_DANADO\"\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/notas-credito/",
+              "host": ["{{base_url}}"],
+              "path": ["notas-credito", ""]
+            }
+          }
+        },
+        {
+          "name": "Crear nota de crédito sin detalles (debe dar 400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orden_venta\": {{orden_venta_id}},\n  \"monto\": \"50.00\",\n  \"saldo_a_favor\": false,\n  \"detalles\": []\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/notas-credito/",
+              "host": ["{{base_url}}"],
+              "path": ["notas-credito", ""]
+            },
+            "description": "Caso de error esperado: 400 Bad Request, 'La nota de crédito debe tener al menos un producto.'"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Detalle de notas de crédito (solo lectura)",
+      "item": [
+        {
+          "name": "Listar detalles de notas de crédito",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/notas-credito-detalle/",
+              "host": ["{{base_url}}"],
+              "path": ["notas-credito-detalle", ""]
+            }
+          }
+        },
+        {
+          "name": "Intentar crear un detalle manual (debe dar 405)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nota_credito\": {{nota_credito_id}},\n  \"producto\": {{producto_id}},\n  \"cantidad_devuelta\": 1,\n  \"destino\": \"STOCK_DISPONIBLE\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/notas-credito-detalle/",
+              "host": ["{{base_url}}"],
+              "path": ["notas-credito-detalle", ""]
+            },
+            "description": "Este endpoint es de solo lectura a propósito (el detalle se crea junto con la nota de crédito). Caso de error esperado: 405 Método no permitido."
+          }
+        }
+      ]
+    }
+  ]
+}
