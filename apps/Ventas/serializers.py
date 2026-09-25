@@ -83,6 +83,10 @@ class OrdenVentaSerializer(serializers.ModelSerializer):
         return detalles
 
     def validate(self, attrs):
+        # Chequeo "optimista" para devolver un error temprano y claro.
+        # El chequeo que realmente vale (con lock) se repite en create(),
+        # ya que entre validate() y create() el stock puede haber cambiado
+        # por otra orden concurrente.
         detalles = attrs.get("detalles", [])
         acumulado = {}
         for item in detalles:
@@ -115,9 +119,40 @@ class OrdenVentaSerializer(serializers.ModelSerializer):
             usuario=usuario, estado=estado_inicial, **validated_data
         )
 
+        # Acumulamos cantidades por producto para bloquear y validar una sola
+        # vez por producto, incluso si aparece en más de un ítem del pedido.
+        cantidad_por_producto = {}
+        for item in detalles_data:
+            producto_id = item["producto"].id
+            cantidad_por_producto[producto_id] = (
+                cantidad_por_producto.get(producto_id, 0) + item["cantidad"]
+            )
+
+        # select_for_update bloquea las filas de producto involucradas hasta
+        # que termine la transacción, evitando que dos órdenes concurrentes
+        # descuenten el mismo stock y lo dejen en negativo.
+        productos_lockeados = {
+            p.id: p
+            for p in Producto.objects.select_for_update().filter(
+                id__in=cantidad_por_producto.keys()
+            )
+        }
+
+        for producto_id, cantidad_total in cantidad_por_producto.items():
+            producto = productos_lockeados[producto_id]
+            if producto.stock < cantidad_total:
+                raise serializers.ValidationError(
+                    {
+                        "detalles": (
+                            f"Stock insuficiente para '{producto.nombre}' "
+                            f"(disponible: {producto.stock})."
+                        )
+                    }
+                )
+
         total = Decimal("0")
         for item in detalles_data:
-            producto = item["producto"]
+            producto = productos_lockeados[item["producto"].id]
             cantidad = item["cantidad"]
             OrdenVentaDetalle.objects.create(
                 orden_venta=orden,
@@ -126,7 +161,10 @@ class OrdenVentaSerializer(serializers.ModelSerializer):
                 precio_unitario=producto.precio,
             )
             total += producto.precio * cantidad
-            producto.stock -= cantidad
+
+        for producto_id, cantidad_total in cantidad_por_producto.items():
+            producto = productos_lockeados[producto_id]
+            producto.stock -= cantidad_total
             producto.save(update_fields=["stock"])
 
         orden.total = total

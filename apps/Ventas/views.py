@@ -24,6 +24,8 @@ class ClienteListView(APIView):
     GET /api/clientes/  -> Lista todos los clientes.
     """
 
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
     def get(self, request):
         clientes = Cliente.objects.all()
         serializer = ClienteSerializer(clientes, many=True)
@@ -36,6 +38,8 @@ class ClienteDetailView(APIView):
     PUT    /api/clientes/<id_cliente>/  -> Actualiza un cliente por id_cliente.
     DELETE /api/clientes/<id_cliente>/  -> Baja lógica: setea estado = 'OF'.
     """
+
+    permission_classes = [IsAuthenticatedOrReadOnly]
 
     def get_object(self, id_cliente):
         return get_object_or_404(Cliente, id_cliente=id_cliente)
@@ -102,10 +106,15 @@ class OrdenVentaViewSet(viewsets.ModelViewSet):
 
 
 class OrdenVentaDetalleViewSet(viewsets.ModelViewSet):
-    """Consulta y administración manual del detalle (normalmente se crea
-    automáticamente junto con la orden de venta)."""
+    """Consulta del detalle. Es de SOLO LECTURA: el detalle se crea
+    automáticamente junto con la orden de venta (ver OrdenVentaSerializer.create).
+
+    No se habilita POST/PUT acá porque el serializer no completa
+    'precio_unitario' (causaba un 500 IntegrityError) ni actualiza el
+    stock del producto o el total de la orden, dejando los datos
+    inconsistentes."""
 
     queryset = OrdenVentaDetalle.objects.select_related("orden_venta", "producto")
     serializer_class = OrdenVentaDetalleSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
-    http_method_names = ["get", "post", "put", "head", "options"]
+    http_method_names = ["get", "head", "options"]
