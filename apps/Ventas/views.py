@@ -1,6 +1,6 @@
 # Vistas del módulo (DRF): ViewSets / APIViews con la lógica de cada endpoint.
 from rest_framework import viewsets
-from rest_framework.permissions import IsAuthenticatedOrReadOnly
+from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
 
 from django.shortcuts import get_object_or_404
 from rest_framework import status
@@ -25,9 +25,13 @@ from .serializers import (
 class ClienteListView(APIView):
     """
     GET /api/clientes/  -> Lista todos los clientes.
-    """
 
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    Sin permission_classes propio a propósito: hereda el default global
+    IsAuthenticated (ver settings.REST_FRAMEWORK), así que exige login
+    incluso para leer. Es la única vista del módulo con ese criterio más
+    estricto (el resto usa IsAuthenticatedOrReadOnly), tal cual estaba
+    en el código original.
+    """
 
     def get(self, request):
         clientes = Cliente.objects.all()
@@ -41,8 +45,6 @@ class ClienteDetailView(APIView):
     PUT    /api/clientes/<id_cliente>/  -> Actualiza un cliente por id_cliente.
     DELETE /api/clientes/<id_cliente>/  -> Baja lógica: setea estado = 'OF'.
     """
-
-    permission_classes = [IsAuthenticatedOrReadOnly]
 
     def get_object(self, id_cliente):
         return get_object_or_404(Cliente, id_cliente=id_cliente)

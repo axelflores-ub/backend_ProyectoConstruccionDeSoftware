@@ -1,26 +1,68 @@
 {
   "info": {
     "name": "Ventas - Tablas nuevas (Anulacion / Nota de crédito)",
-    "description": "Colección solo para los endpoints de las tablas nuevas agregadas: anulaciones, notas-credito y notas-credito-detalle. Para el resto de los endpoints (clientes, productos, ordenes-venta, etc.) usá una colección aparte si la necesitás.\n\nAutenticación: los endpoints de escritura (POST) requieren estar autenticado (IsAuthenticatedOrReadOnly). Esta colección usa Basic Auth a nivel de colección con las variables {{usuario}} / {{password}}.",
+    "description": "Colección solo para los endpoints de las tablas nuevas agregadas: anulaciones, notas-credito y notas-credito-detalle. Para el resto de los endpoints (clientes, productos, ordenes-venta, etc.) usá una colección aparte si la necesitás.\n\nAutenticación: el proyecto usa JWT (rest_framework_simplejwt), no Basic Auth. Corré primero el request '0. Login (obtener JWT)' de la carpeta Autenticación: guarda el access token en la variable de colección {{access_token}} automáticamente, y el resto de los requests ya lo usan como Bearer token. Los tokens expiran (ACCESS_TOKEN_LIFETIME_MIN en el .env), así que si empezás a recibir 401 después de un rato, volvé a correr el login.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
-    "type": "basic",
-    "basic": [
-      { "key": "username", "value": "{{usuario}}", "type": "string" },
-      { "key": "password", "value": "{{password}}", "type": "string" }
+    "type": "bearer",
+    "bearer": [
+      { "key": "token", "value": "{{access_token}}", "type": "string" }
     ]
   },
   "variable": [
-    { "key": "base_url", "value": "http://localhost:8000/api/ventas", "type": "string" },
+    { "key": "host", "value": "http://localhost:8000", "type": "string" },
+    { "key": "base_url", "value": "{{host}}/api/ventas", "type": "string" },
     { "key": "usuario", "value": "", "type": "string" },
     { "key": "password", "value": "", "type": "string" },
+    { "key": "access_token", "value": "", "type": "string" },
     { "key": "orden_venta_id", "value": "1", "type": "string" },
     { "key": "producto_id", "value": "1", "type": "string" },
     { "key": "anulacion_id", "value": "1", "type": "string" },
     { "key": "nota_credito_id", "value": "1", "type": "string" }
   ],
   "item": [
+    {
+      "name": "0. Autenticación",
+      "item": [
+        {
+          "name": "Login (obtener JWT)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data.access) {",
+                  "    pm.collectionVariables.set('access_token', data.access);",
+                  "    console.log('access_token guardado en la variable de colección');",
+                  "} else {",
+                  "    console.error('La respuesta no trajo access token:', data);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{usuario}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{host}}/api/auth/login/",
+              "host": ["{{host}}"],
+              "path": ["api", "auth", "login", ""]
+            },
+            "description": "Corré este request primero. Completá las variables de colección 'usuario' y 'password' con un usuario real de tu base. El script de test de este request guarda automáticamente el 'access' token en {{access_token}}, que usan todos los demás requests como Bearer token."
+          }
+        }
+      ]
+    },
     {
       "name": "Anulaciones",
       "item": [
