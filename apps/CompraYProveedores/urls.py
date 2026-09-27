@@ -10,7 +10,6 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     EstadoOrdenCompraViewSet,
-    OrdenCompraDetalleViewSet,
     OrdenCompraViewSet,
     ProveedorViewSet,
 )
@@ -25,12 +24,9 @@ router = DefaultRouter()
 # DELETE /api/compras/proveedores/{id}/      - eliminar proveedor
 router.register("proveedores", ProveedorViewSet, basename="proveedor")
 
-# CRUD de Estados de Orden de Compra (catalogo)
+# Catálogo de estados (solo lectura)
 # GET    /api/compras/estados-orden-compra/           - lista de estados
-# POST   /api/compras/estados-orden-compra/           - crear estado
 # GET    /api/compras/estados-orden-compra/{id}/      - detalle de estado
-# PUT    /api/compras/estados-orden-compra/{id}/      - actualizar estado
-# DELETE /api/compras/estados-orden-compra/{id}/      - eliminar estado
 router.register(
     "estados-orden-compra",
     EstadoOrdenCompraViewSet,
@@ -44,17 +40,5 @@ router.register(
 # PUT    /api/compras/ordenes-compra/{id}/      - actualizar orden
 # DELETE /api/compras/ordenes-compra/{id}/      - eliminar orden
 router.register("ordenes-compra", OrdenCompraViewSet, basename="orden-compra")
-
-# CRUD de Detalles de Orden de Compra (renglones)
-# GET    /api/compras/ordenes-compra-detalle/           - lista de detalles
-# POST   /api/compras/ordenes-compra-detalle/           - crear detalle
-# GET    /api/compras/ordenes-compra-detalle/{id}/      - detalle especifico
-# PUT    /api/compras/ordenes-compra-detalle/{id}/      - actualizar detalle
-# DELETE /api/compras/ordenes-compra-detalle/{id}/      - eliminar detalle
-router.register(
-    "ordenes-compra-detalle",
-    OrdenCompraDetalleViewSet,
-    basename="orden-compra-detalle",
-)
 
 urlpatterns = router.urls
