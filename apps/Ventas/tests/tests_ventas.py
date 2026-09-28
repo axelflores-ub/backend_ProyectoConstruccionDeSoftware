@@ -138,6 +138,82 @@ class VentasTestCase(APITestCase):
             status.HTTP_404_NOT_FOUND
         )
 
+    def test_crear_cliente(self):
+        data = {
+            "nombre": "Cliente Nuevo",
+            "telefono": "1133334444",
+            "email": "nuevo@test.com",
+            "direccion": "Calle Nueva 456",
+            "cuil": "20-11111111-1",
+            "condicion_iva": "Monotributo",
+        }
+
+        response = self.client.post(
+            "/api/ventas/clientes/",
+            data,
+            format="json"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["nombre"], "Cliente Nuevo")
+        self.assertEqual(response.data["estado"], Cliente.ESTADO_ACTIVO)
+        self.assertIn("id_cliente", response.data)
+
+        cliente = Cliente.objects.get(id_cliente=response.data["id_cliente"])
+        self.assertEqual(cliente.cuil, "20-11111111-1")
+        self.assertEqual(cliente.condicion_iva, "Monotributo")
+
+    def test_crear_cliente_solo_con_nombre(self):
+        response = self.client.post(
+            "/api/ventas/clientes/",
+            {"nombre": "Solo Nombre"},
+            format="json"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["estado"], Cliente.ESTADO_ACTIVO)
+        self.assertEqual(Cliente.objects.count(), 2)
+
+    def test_crear_cliente_siempre_queda_activo(self):
+        # Aunque el body intente crearlo dado de baja, debe quedar activo.
+        response = self.client.post(
+            "/api/ventas/clientes/",
+            {"nombre": "Intento de baja", "estado": Cliente.ESTADO_BAJA},
+            format="json"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        cliente = Cliente.objects.get(id_cliente=response.data["id_cliente"])
+        self.assertEqual(cliente.estado, Cliente.ESTADO_ACTIVO)
+
+    def test_crear_cliente_sin_nombre(self):
+        response = self.client.post(
+            "/api/ventas/clientes/",
+            {"email": "sinnombre@test.com"},
+            format="json"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("nombre", response.data)
+        self.assertEqual(Cliente.objects.count(), 1)
+
+    def test_crear_cliente_sin_autenticacion(self):
+        self.client.force_authenticate(user=None)
+
+        response = self.client.post(
+            "/api/ventas/clientes/",
+            {"nombre": "Anonimo"},
+            format="json"
+        )
+
+        # 401 con JWT, 403 con SessionAuthentication.
+        self.assertIn(
+            response.status_code,
+            (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
+        )
+        self.assertFalse(Cliente.objects.filter(nombre="Anonimo").exists())
+
     # -------------------------
     # PRODUCTOS
     # -------------------------
@@ -419,22 +495,25 @@ class VentasTestCase(APITestCase):
             "direccion": "Calle Falsa 123",
             "cuil": "20-12345678-9",
             "condicion_iva": "Responsable Inscripto",
-            "estado": Cliente.ESTADO_ACTIVO,
         }
 
-        # Nota: el ABM de clientes no tiene endpoint de creación (POST) hoy,
-        # así que probamos que el campo se guarda y se expone vía update.
-        self.cliente.cuil = data["cuil"]
-        self.cliente.condicion_iva = data["condicion_iva"]
-        self.cliente.save(update_fields=["cuil", "condicion_iva"])
-
-        response = self.client.get(
-            f"/api/ventas/clientes/{self.cliente.id_cliente}/"
+        response = self.client.post(
+            "/api/ventas/clientes/",
+            data,
+            format="json"
         )
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data["cuil"], "20-12345678-9")
         self.assertEqual(response.data["condicion_iva"], "Responsable Inscripto")
+
+        detalle = self.client.get(
+            f"/api/ventas/clientes/{response.data['id_cliente']}/"
+        )
+
+        self.assertEqual(detalle.status_code, status.HTTP_200_OK)
+        self.assertEqual(detalle.data["cuil"], "20-12345678-9")
+        self.assertEqual(detalle.data["condicion_iva"], "Responsable Inscripto")
 
     def test_modificar_cliente_actualiza_cuil(self):
         data = {

@@ -24,7 +24,8 @@ from .serializers import (
 
 class ClienteListView(APIView):
     """
-    GET /api/clientes/  -> Lista todos los clientes.
+    GET  /api/clientes/  -> Lista todos los clientes.
+    POST /api/clientes/  -> Crea un cliente nuevo (siempre arranca activo, estado = 'AC').
     """
     permission_classes = [IsAuthenticatedOrReadOnly]
     serializer_class = ClienteSerializer
@@ -33,6 +34,15 @@ class ClienteListView(APIView):
         clientes = Cliente.objects.all()
         serializer = ClienteSerializer(clientes, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        serializer = ClienteSerializer(data=request.data)
+        if serializer.is_valid():
+            # Un cliente nuevo siempre se crea activo, sin importar lo que
+            # venga en el body (evita darlo de alta ya en baja).
+            serializer.save(estado=Cliente.ESTADO_ACTIVO)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class ClienteDetailView(APIView):
