@@ -31,9 +31,10 @@ class Proveedor(models.Model):
     telefono = models.CharField(max_length=50, blank=True)
     cuit = models.CharField(max_length=13, unique=True)
     direccion = models.CharField(max_length=200, blank=True)
-    producto_id = models.PositiveIntegerField(
-        unique=True,
-        help_text="1 a 1 con Producto.",
+    productos = models.ManyToManyField(
+        "SCM.Producto",
+        related_name="proveedores",
+        blank=True,
     )
 
     class Meta:

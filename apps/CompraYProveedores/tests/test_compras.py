@@ -57,12 +57,12 @@ def test_crear_y_listar_proveedor(auth_client):
             "email": "test@corralon.test",
             "cuit": "30712345678",
             "direccion": "Calle 1",
-            "producto_id": 1,
+            "productos": [1],
         },
         format="json",
     )
     assert alta.status_code == 201
-    assert alta.data["producto_id"] == 1
+    assert 1 in alta.data["productos"]
 
     listado = auth_client.get("/api/compras/proveedores/")
     assert listado.status_code == 200
@@ -77,7 +77,7 @@ def test_cuit_con_y_sin_guiones_es_el_mismo_proveedor(auth_client):
             "nombre": "Madera Norte",
             "apellido": "SA",
             "cuit": "20442152099",
-            "producto_id": 10,
+            "productos": [10],
         },
         format="json",
     )
@@ -90,7 +90,7 @@ def test_cuit_con_y_sin_guiones_es_el_mismo_proveedor(auth_client):
             "nombre": "Madera Norte Bis",
             "apellido": "SRL",
             "cuit": "20-44215209-9",
-            "producto_id": 11,
+            "productos": [11],
         },
         format="json",
     )
@@ -109,7 +109,7 @@ def test_proveedor_sin_datos_mensajes_claros(auth_client):
     assert "Falta completar el nombre." in str(response.data.get("nombre", []))
     assert "Falta completar el apellido." in str(response.data.get("apellido", []))
     assert "Falta completar el CUIT." in str(response.data.get("cuit", []))
-    assert "producto_id" in response.data
+    assert "productos" in response.data
 
 
 def _id_estado(client, nombre):
@@ -129,7 +129,7 @@ def test_alta_de_orden_trae_renglones_y_queda_pendiente(auth_client):
             "nombre": "Proveedor OC",
             "apellido": "SA",
             "cuit": "27111222334",
-            "producto_id": 2,
+            "productos": [2],
         },
         format="json",
     )
@@ -141,7 +141,7 @@ def test_alta_de_orden_trae_renglones_y_queda_pendiente(auth_client):
             "proveedor": proveedor.data["proveedor_id"],
             "fecha": "2026-09-04T10:00:00-03:00",
             "total": "15000.00",
-            "detalles": [{"producto_id": 2, "cantidad": 10, "precio_unitario": "1500.00"}],
+            "detalles": [{"productos": [2], "cantidad": 10, "precio_unitario": "1500.00"}],
         },
         format="json",
     )
@@ -167,7 +167,7 @@ def test_alta_de_orden_no_acepta_otro_estado_que_pendiente(auth_client):
             "nombre": "Proveedor Estado",
             "apellido": "SA",
             "cuit": "30111222335",
-            "producto_id": 3,
+            "productos": [3],
         },
         format="json",
     )
@@ -180,7 +180,7 @@ def test_alta_de_orden_no_acepta_otro_estado_que_pendiente(auth_client):
             "estado": _id_estado(auth_client, "Recibida"),
             "fecha": "2026-09-04T10:00:00-03:00",
             "total": "100.00",
-            "detalles": [{"producto_id": 3, "cantidad": 1, "precio_unitario": "100.00"}],
+            "detalles": [{"productos": [3], "cantidad": 1, "precio_unitario": "100.00"}],
         },
         format="json",
     )
@@ -219,7 +219,7 @@ def test_orden_pendiente_no_pasa_directo_a_recibida(auth_client):
             "nombre": "Proveedor Salto",
             "apellido": "SA",
             "cuit": "23111222336",
-            "producto_id": producto_id,
+            "productos": [producto_id],
         },
         format="json",
     )
@@ -232,7 +232,7 @@ def test_orden_pendiente_no_pasa_directo_a_recibida(auth_client):
             "total": "500.00",
             "detalles": [
                 {
-                    "producto_id": producto_id,
+                    "productos": [producto_id],
                     "cantidad": 1,
                     "precio_unitario": "500.00",
                 }
@@ -263,7 +263,7 @@ def test_orden_rechazada_no_vuelve_a_aprobada(auth_client):
             "nombre": "Proveedor Rechazo",
             "apellido": "SA",
             "cuit": "24111222337",
-            "producto_id": 40,
+            "productos": [40],
         },
         format="json",
     )
@@ -307,7 +307,7 @@ def test_orden_aprobada_no_cambia_el_total(auth_client):
             "nombre": "Proveedor Total",
             "apellido": "SA",
             "cuit": "25111222338",
-            "producto_id": 41,
+            "productos": [41],
         },
         format="json",
     )
@@ -351,7 +351,7 @@ def test_orden_aprobada_no_vuelve_a_pendiente(auth_client):
             "nombre": "Proveedor Vuelta",
             "apellido": "SA",
             "cuit": "26111222339",
-            "producto_id": 42,
+            "productos": [42],
         },
         format="json",
     )
@@ -419,7 +419,7 @@ def test_flujo_orden_compra_con_detalle(auth_client):
             "email": "",
             "cuit": "20111222333",
             "direccion": "",
-            "producto_id": 2,
+            "productos": [2],
         },
         format="json",
     )
@@ -431,7 +431,7 @@ def test_flujo_orden_compra_con_detalle(auth_client):
             "estado": estado.estadoordencompra_id,
             "fecha": "2026-09-04T10:00:00-03:00",
             "total": "15000.00",
-            "detalles": [{"producto_id": 2, "cantidad": 10, "precio_unitario": "1500.00"}],
+            "detalles": [{"productos": [2], "cantidad": 10, "precio_unitario": "1500.00"}],
         },
         format="json",
     )
@@ -456,7 +456,7 @@ def _orden(client, proveedor_id, total, producto_id, cantidad, precio):
             "total": total,
             "detalles": [
                 {
-                    "producto_id": producto_id,
+                    "productos": [producto_id],
                     "cantidad": cantidad,
                     "precio_unitario": precio,
                 }
@@ -522,7 +522,7 @@ def test_recorrido_completo_del_modulo(auth_client):
             "nombre": "Maderas del Norte",
             "apellido": "SA",
             "cuit": "20442152099",
-            "producto_id": producto_id,
+            "productos": [producto_id],
         },
         format="json",
     )
@@ -536,7 +536,7 @@ def test_recorrido_completo_del_modulo(auth_client):
             "nombre": "Maderas del Norte Bis",
             "apellido": "SRL",
             "cuit": "20-44215209-9",
-            "producto_id": producto_id + 1,
+            "productos": [producto_id + 1],
         },
         format="json",
     )

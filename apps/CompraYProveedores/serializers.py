@@ -51,7 +51,7 @@ class ProveedorSerializer(serializers.ModelSerializer):
             "telefono",
             "cuit",
             "direccion",
-            "producto_id",
+            "productos",
         ]
         extra_kwargs = {
             "nombre": {
@@ -80,13 +80,13 @@ class ProveedorSerializer(serializers.ModelSerializer):
                     "max_length": "El CUIT no puede tener más de 13 caracteres.",
                 },
             },
-            "producto_id": {
+            "productos": {
                 "required": True,
+                "allow_empty": False,
                 "error_messages": {
-                    "required": "Falta indicar el producto (producto_id).",
-                    "invalid": "producto_id tiene que ser un número entero.",
-                    "unique": "Ese producto ya está asignado a otro proveedor.",
-                    "min_value": "producto_id tiene que ser mayor a 0.",
+                    "required": "Falta indicar el producto.",
+                    "invalid": "El formato de productos no es válido.",
+                    "empty": "El proveedor debe tener al menos un producto asociado.",
                 },
             },
             "email": {
@@ -126,12 +126,7 @@ class ProveedorSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Ya existe un proveedor con ese CUIT.")
         return canonico
 
-    def validate_producto_id(self, value):
-        if value is None:
-            raise serializers.ValidationError("Falta indicar el producto (producto_id).")
-        if value < 1:
-            raise serializers.ValidationError("producto_id tiene que ser mayor a 0.")
-        return value
+
 
 
 class EstadoOrdenCompraSerializer(serializers.ModelSerializer):
