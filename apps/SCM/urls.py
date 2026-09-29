@@ -1,8 +1,16 @@
-# Rutas del módulo. Registrá tus ViewSets en un router y exponé `urlpatterns`.
-#
-# from rest_framework.routers import DefaultRouter
-# router = DefaultRouter()
-# router.register("recurso", RecursoViewSet, basename="recurso")
-# urlpatterns = router.urls
+from rest_framework.routers import DefaultRouter
 
-urlpatterns = []
+from apps.SCM.views import (
+    MovimientoInventarioViewSet,
+    ProductoViewSet,
+    RubroViewSet,
+)
+
+router = DefaultRouter()
+router.register("rubros", RubroViewSet, basename="rubro")
+router.register("productos", ProductoViewSet, basename="producto")
+router.register(
+    "movimientos-inventario", MovimientoInventarioViewSet, basename="movimiento-inventario"
+)
+
+urlpatterns = router.urls
