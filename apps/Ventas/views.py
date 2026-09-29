@@ -1,14 +1,17 @@
-# Vistas del módulo (DRF): ViewSets / APIViews con la lógica de cada endpoint.
-from rest_framework import viewsets
-from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
-
-from django.shortcuts import get_object_or_404
-from rest_framework import status
+# Vistas del módulo (DRF): ViewSets con la lógica de cada endpoint.
+# Permisos: se usa el default global de settings.py (IsAuthenticated -> requiere JWT).
+from rest_framework import status, viewsets
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
-
-from .models import Anulacion, Cliente, DetalleNotaCredito, EstadoOrdenVenta, NotaCredito, OrdenVenta, OrdenVentaDetalle, Producto
+from .models import (
+    Anulacion,
+    Cliente,
+    DetalleNotaCredito,
+    EstadoOrdenVenta,
+    NotaCredito,
+    OrdenVenta,
+    OrdenVentaDetalle,
+)
 from .serializers import (
     AnulacionSerializer,
     ClienteSerializer,
@@ -18,98 +21,64 @@ from .serializers import (
     OrdenVentaDetalleSerializer,
     OrdenVentaSerializer,
     OrdenVentaUpdateSerializer,
-    ProductoSerializer,
 )
 
 
-class ClienteListView(APIView):
+class ClienteViewSet(viewsets.ModelViewSet):
     """
-    GET  /api/clientes/  -> Lista todos los clientes.
-    POST /api/clientes/  -> Crea un cliente nuevo (siempre arranca activo, estado = 'AC').
+    GET    /api/ventas/clientes/                -> Lista clientes (paginado).
+    POST   /api/ventas/clientes/                -> Crea un cliente (siempre activo, 'AC').
+    GET    /api/ventas/clientes/<id_cliente>/   -> Obtiene un cliente.
+    PUT    /api/ventas/clientes/<id_cliente>/   -> Actualiza un cliente.
+    DELETE /api/ventas/clientes/<id_cliente>/   -> Baja lógica: setea estado = 'OF'.
     """
-    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    queryset = Cliente.objects.all()  # sin relaciones: no hay nada que precargar
     serializer_class = ClienteSerializer
+    lookup_field = "id_cliente"
+    lookup_value_regex = r"\d+"
+    search_fields = ["nombre", "email", "telefono", "cuil"]
+    ordering_fields = ["id_cliente", "nombre", "estado"]
 
-    def get(self, request):
-        clientes = Cliente.objects.all()
-        serializer = ClienteSerializer(clientes, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+    def perform_create(self, serializer):
+        # Un cliente nuevo siempre se crea activo, sin importar lo que venga en el body.
+        serializer.save(estado=Cliente.ESTADO_ACTIVO)
 
-    def post(self, request):
-        serializer = ClienteSerializer(data=request.data)
-        if serializer.is_valid():
-            # Un cliente nuevo siempre se crea activo, sin importar lo que
-            # venga en el body (evita darlo de alta ya en baja).
-            serializer.save(estado=Cliente.ESTADO_ACTIVO)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-class ClienteDetailView(APIView):
-    """
-    GET    /api/clientes/<id_cliente>/  -> Obtiene un cliente por id_cliente.
-    PUT    /api/clientes/<id_cliente>/  -> Actualiza un cliente por id_cliente.
-    DELETE /api/clientes/<id_cliente>/  -> Baja lógica: setea estado = 'OF'.
-    """
-    permission_classes = [IsAuthenticatedOrReadOnly]
-    serializer_class = ClienteSerializer
-
-    def get_object(self, id_cliente):
-        return get_object_or_404(Cliente, id_cliente=id_cliente)
-
-    def get(self, request, id_cliente):
-        cliente = self.get_object(id_cliente)
-        serializer = ClienteSerializer(cliente)
-        return Response(serializer.data, status=status.HTTP_200_OK)
-
-    def put(self, request, id_cliente):
-        cliente = self.get_object(id_cliente)
-        serializer = ClienteSerializer(cliente, data=request.data, partial=False)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    def delete(self, request, id_cliente):
-        cliente = self.get_object(id_cliente)
+    def destroy(self, request, *args, **kwargs):
+        cliente = self.get_object()
         cliente.estado = Cliente.ESTADO_BAJA  # 'OF'
-        cliente.save(update_fields=['estado'])
-        serializer = ClienteSerializer(cliente)
+        cliente.save(update_fields=["estado"])
         return Response(
             {
-                'mensaje': f'Cliente {id_cliente} dado de baja correctamente (estado = OF).',
-                'cliente': serializer.data,
+                "mensaje": (
+                    f"Cliente {cliente.id_cliente} dado de baja correctamente (estado = OF)."
+                ),
+                "cliente": ClienteSerializer(cliente).data,
             },
             status=status.HTTP_200_OK,
         )
 
 
-
-class ProductoViewSet(viewsets.ModelViewSet):
-    queryset = Producto.objects.all().order_by("nombre")
-    serializer_class = ProductoSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
-    http_method_names = ["get", "post", "put", "head", "options"]
-
-
 class EstadoOrdenVentaViewSet(viewsets.ModelViewSet):
     """Catálogo de estados (Pendiente, Confirmada, Completada, etc.)."""
 
-    queryset = EstadoOrdenVenta.objects.all().order_by("nombre")
+    queryset = EstadoOrdenVenta.objects.all().order_by("nombre")  # sin relaciones
     serializer_class = EstadoOrdenVentaSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
-    http_method_names = ["get", "post", "put", "head", "options"]
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
+    search_fields = ["nombre"]
+    ordering_fields = ["nombre"]
 
 
 class OrdenVentaViewSet(viewsets.ModelViewSet):
-    """Registrar (POST), modificar cliente/forma de pago/estado (PUT)
+    """Registrar (POST), modificar cliente/forma de pago/estado (PUT/PATCH)
     y listar/consultar (GET) órdenes de venta."""
 
-    queryset = OrdenVenta.objects.select_related(
-        "cliente", "estado", "usuario"
-    ).prefetch_related("detalles")
-    permission_classes = [IsAuthenticatedOrReadOnly]
-    http_method_names = ["get", "post", "put", "head", "options"]
+    queryset = OrdenVenta.objects.select_related("cliente", "estado", "usuario").prefetch_related(
+        "detalles__producto"
+    )
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
+    search_fields = ["cliente__nombre", "cliente__cuil", "numero_comprobante"]
+    ordering_fields = ["id", "fecha", "total"]
 
     def get_serializer_class(self):
         if self.action in ("update", "partial_update"):
@@ -119,17 +88,17 @@ class OrdenVentaViewSet(viewsets.ModelViewSet):
 
 class OrdenVentaDetalleViewSet(viewsets.ModelViewSet):
     """Consulta del detalle. Es de SOLO LECTURA: el detalle se crea
-    automáticamente junto con la orden de venta (ver OrdenVentaSerializer.create).
+    automáticamente junto con la orden de venta (ver services.registrar_orden_venta).
 
     No se habilita POST/PUT acá porque el serializer no completa
-    'precio_unitario' (causaba un 500 IntegrityError) ni actualiza el
-    stock del producto o el total de la orden, dejando los datos
-    inconsistentes."""
+    'precio_unitario' ni actualiza el stock del producto o el total de la orden,
+    dejando los datos inconsistentes."""
 
     queryset = OrdenVentaDetalle.objects.select_related("orden_venta", "producto")
     serializer_class = OrdenVentaDetalleSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
     http_method_names = ["get", "head", "options"]
+    search_fields = ["producto__nombre", "orden_venta__numero_comprobante"]
+    ordering_fields = ["id", "cantidad"]
 
 
 class AnulacionViewSet(viewsets.ModelViewSet):
@@ -139,8 +108,9 @@ class AnulacionViewSet(viewsets.ModelViewSet):
 
     queryset = Anulacion.objects.select_related("orden_venta")
     serializer_class = AnulacionSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
     http_method_names = ["get", "post", "head", "options"]
+    search_fields = ["motivo", "orden_venta__numero_comprobante"]
+    ordering_fields = ["id", "fecha"]
 
 
 class NotaCreditoViewSet(viewsets.ModelViewSet):
@@ -148,10 +118,13 @@ class NotaCreditoViewSet(viewsets.ModelViewSet):
     para los ítems marcados como 'stock disponible' y mueve la orden a
     'Devolución parcial'. No se edita ni se borra una vez creada."""
 
-    queryset = NotaCredito.objects.select_related("orden_venta").prefetch_related("detalles")
+    queryset = NotaCredito.objects.select_related("orden_venta").prefetch_related(
+        "detalles__producto"
+    )
     serializer_class = NotaCreditoSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
     http_method_names = ["get", "post", "head", "options"]
+    search_fields = ["orden_venta__numero_comprobante"]
+    ordering_fields = ["id", "fecha", "monto"]
 
 
 class DetalleNotaCreditoViewSet(viewsets.ModelViewSet):
@@ -160,5 +133,6 @@ class DetalleNotaCreditoViewSet(viewsets.ModelViewSet):
 
     queryset = DetalleNotaCredito.objects.select_related("nota_credito", "producto")
     serializer_class = DetalleNotaCreditoSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
     http_method_names = ["get", "head", "options"]
+    search_fields = ["producto__nombre"]
+    ordering_fields = ["id", "cantidad_devuelta"]

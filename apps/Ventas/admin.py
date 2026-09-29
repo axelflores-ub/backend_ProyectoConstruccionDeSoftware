@@ -9,7 +9,6 @@ from .models import (
     NotaCredito,
     OrdenVenta,
     OrdenVentaDetalle,
-    Producto,
 )
 
 
@@ -19,22 +18,25 @@ class OrdenVentaDetalleInline(admin.TabularInline):
     readonly_fields = ["precio_unitario"]
 
 
-@admin.register(Cliente)
-class ClienteAdmin(admin.ModelAdmin):
- list_display = ('id_cliente', 'nombre', 'telefono', 'email', 'direccion', 'cuil', 'condicion_iva', 'estado')
- list_filter = ('estado', 'condicion_iva')
- search_fields = ('nombre', 'email', 'telefono', 'cuil')
-
-
-@admin.register(Producto)
-class ProductoAdmin(admin.ModelAdmin):
-    list_display = ["id", "nombre", "precio", "stock"]
-    search_fields = ["nombre"]
-
-
 class DetalleNotaCreditoInline(admin.TabularInline):
     model = DetalleNotaCredito
     extra = 0
+
+
+@admin.register(Cliente)
+class ClienteAdmin(admin.ModelAdmin):
+    list_display = [
+        "id_cliente",
+        "nombre",
+        "telefono",
+        "email",
+        "direccion",
+        "cuil",
+        "condicion_iva",
+        "estado",
+    ]
+    list_filter = ["estado", "condicion_iva"]
+    search_fields = ["nombre", "email", "telefono", "cuil"]
 
 
 @admin.register(EstadoOrdenVenta)
@@ -45,9 +47,18 @@ class EstadoOrdenVentaAdmin(admin.ModelAdmin):
 
 @admin.register(OrdenVenta)
 class OrdenVentaAdmin(admin.ModelAdmin):
-    list_display = ["id", "cliente", "estado", "forma_pago", "tipo_comprobante", "numero_comprobante", "fecha", "total"]
+    list_display = [
+        "id",
+        "cliente",
+        "estado",
+        "forma_pago",
+        "tipo_comprobante",
+        "numero_comprobante",
+        "fecha",
+        "total",
+    ]
     list_filter = ["estado", "forma_pago", "tipo_comprobante"]
-    search_fields = ["cliente__nombre", "cliente__documento", "numero_comprobante"]
+    search_fields = ["cliente__nombre", "cliente__cuil", "numero_comprobante"]
     inlines = [OrdenVentaDetalleInline]
 
 

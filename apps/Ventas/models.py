@@ -5,54 +5,49 @@ from django.db import models
 
 class Cliente(models.Model):
     """
-    Modelo que representa la tabla 'clientes'.
+    Modelo que representa la tabla 'cliente'.
     La baja lógica se maneja actualizando el campo 'estado' a 'OF'.
     """
- 
-    ESTADO_ACTIVO = 'AC'
-    ESTADO_BAJA = 'OF'
- 
-    id_cliente = models.AutoField(primary_key=True, db_column='id_cliente')
-    nombre = models.CharField(max_length=150, db_column='nombre')
-    telefono = models.CharField(max_length=50, db_column='telefono', blank=True, null=True)
-    email = models.CharField(max_length=100, db_column='email', blank=True, null=True)
-    direccion = models.CharField(max_length=200, db_column='direccion', blank=True, null=True)
+
+    class Estado(models.TextChoices):
+        ACTIVO = "AC", "Activo"
+        BAJA = "OF", "Baja"
+
+    ESTADO_ACTIVO = Estado.ACTIVO
+    ESTADO_BAJA = Estado.BAJA
+
+    # En la base la columna se llama "id" (DER); el atributo y la API siguen usando id_cliente.
+    id_cliente = models.AutoField(primary_key=True, db_column="id")
+    nombre = models.CharField(max_length=150, db_column="nombre")
+    telefono = models.CharField(max_length=50, db_column="telefono", blank=True, null=True)
+    email = models.CharField(max_length=100, db_column="email", blank=True, null=True)
+    direccion = models.CharField(max_length=200, db_column="direccion", blank=True, null=True)
     cuil = models.CharField(
-        max_length=20, db_column='cuil', blank=True, null=True,
+        max_length=20,
+        db_column="cuil",
+        blank=True,
+        null=True,
         help_text="Para buscar al cliente por CUIL en Registrar venta.",
     )
     condicion_iva = models.CharField(
-        max_length=50, db_column='condicion_iva', blank=True, null=True,
+        max_length=50,
+        db_column="condicion_iva",
+        blank=True,
+        null=True,
         help_text="Usado para sugerir el tipo de comprobante (A/B/C) automáticamente.",
     )
-    estado = models.CharField(max_length=2, db_column='estado', default=ESTADO_ACTIVO)
- 
-    class Meta:
-        db_table = 'clientes'
-        verbose_name = 'Cliente'
-        verbose_name_plural = 'Clientes'
-        ordering = ['id_cliente']
- 
-    def __str__(self):
-        return f'{self.id_cliente} - {self.nombre}'
-
-
-
-class Producto(models.Model):
-    """Nota: se asume acá como referencia simple para poder registrar el detalle
-    de la orden de venta. Si en tu proyecto el catálogo de productos vive en otro
-    módulo (p. ej. Inventario), reemplazá esta FK por la de ese módulo."""
-
-    nombre = models.CharField(max_length=150)
-    precio = models.DecimalField(max_digits=12, decimal_places=2)
-    stock = models.PositiveIntegerField(default=0)
+    estado = models.CharField(
+        max_length=2, db_column="estado", choices=Estado.choices, default=Estado.ACTIVO
+    )
 
     class Meta:
-        verbose_name = "Producto"
-        verbose_name_plural = "Productos"
+        db_table = "cliente"
+        verbose_name = "Cliente"
+        verbose_name_plural = "Clientes"
+        ordering = ["id_cliente"]
 
     def __str__(self):
-        return f"{self.nombre} (stock: {self.stock})"
+        return f"{self.id_cliente} - {self.nombre}"
 
 
 class EstadoOrdenVenta(models.Model):
@@ -60,8 +55,10 @@ class EstadoOrdenVenta(models.Model):
     descripcion = models.CharField(max_length=200, blank=True)
 
     class Meta:
+        db_table = "estado_orden_venta"
         verbose_name = "Estado de orden de venta"
         verbose_name_plural = "Estados de orden de venta"
+        ordering = ["nombre"]
 
     def __str__(self):
         return self.nombre
@@ -80,9 +77,7 @@ class OrdenVenta(models.Model):
         FACTURA_C = "FACTURA_C", "Factura C"
         NOTA_VENTA = "NOTA_VENTA", "Nota de venta"
 
-    cliente = models.ForeignKey(
-        Cliente, on_delete=models.PROTECT, related_name="ordenes_venta"
-    )
+    cliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name="ordenes_venta")
     usuario = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -95,16 +90,23 @@ class OrdenVenta(models.Model):
     )
     forma_pago = models.CharField(max_length=20, choices=FormaPago.choices)
     numero_comprobante = models.CharField(
-        max_length=20, blank=True, null=True, unique=True,
+        max_length=20,
+        blank=True,
+        null=True,
+        unique=True,
         help_text='Ej: "B-0002145". Se muestra en el historial de Devoluciones.',
     )
     tipo_comprobante = models.CharField(
-        max_length=20, choices=TipoComprobante.choices, blank=True, null=True,
+        max_length=20,
+        choices=TipoComprobante.choices,
+        blank=True,
+        null=True,
     )
     fecha = models.DateTimeField(auto_now_add=True)
     total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
     class Meta:
+        db_table = "orden_venta"
         verbose_name = "Orden de venta"
         verbose_name_plural = "Ordenes de venta"
         ordering = ["-fecha"]
@@ -119,19 +121,19 @@ class OrdenVenta(models.Model):
 
 
 class OrdenVentaDetalle(models.Model):
-    orden_venta = models.ForeignKey(
-        OrdenVenta, on_delete=models.CASCADE, related_name="detalles"
-    )
+    orden_venta = models.ForeignKey(OrdenVenta, on_delete=models.CASCADE, related_name="detalles")
     producto = models.ForeignKey(
-        Producto, on_delete=models.PROTECT, related_name="detalles_orden_venta"
+        "scm.Producto", on_delete=models.PROTECT, related_name="detalles_orden_venta"
     )
     cantidad = models.PositiveIntegerField()
     precio_unitario = models.DecimalField(max_digits=12, decimal_places=2)
     descuento = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
     class Meta:
+        db_table = "orden_venta_detalle"
         verbose_name = "Detalle de orden de venta"
         verbose_name_plural = "Detalles de orden de venta"
+        ordering = ["id"]
 
     def __str__(self):
         return f"{self.cantidad} x {self.producto.nombre}"
@@ -144,7 +146,8 @@ class OrdenVentaDetalle(models.Model):
 class Anulacion(models.Model):
     """Se crea cuando se anula un comprobante desde la pantalla de
     Devoluciones (botón 'Anular'). Al anularse, la orden pasa a estado
-    'Anulada'. Una orden solo puede anularse una vez."""
+    'Anulada'. Una orden solo puede anularse una vez (por eso es OneToOne y el
+    related_name va en singular: es una relación 1 a 1, no una colección)."""
 
     orden_venta = models.OneToOneField(
         OrdenVenta, on_delete=models.CASCADE, related_name="anulacion"
@@ -154,8 +157,10 @@ class Anulacion(models.Model):
     fecha = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        db_table = "anulacion"
         verbose_name = "Anulación"
         verbose_name_plural = "Anulaciones"
+        ordering = ["-fecha"]
 
     def __str__(self):
         return f"Anulación de orden #{self.orden_venta_id} - {self.motivo}"
@@ -173,8 +178,10 @@ class NotaCredito(models.Model):
     fecha = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        db_table = "nota_credito"
         verbose_name = "Nota de crédito"
         verbose_name_plural = "Notas de crédito"
+        ordering = ["-fecha"]
 
     def __str__(self):
         return f"Nota de crédito #{self.pk} - Orden #{self.orden_venta_id}"
@@ -188,18 +195,18 @@ class DetalleNotaCredito(models.Model):
         STOCK_DISPONIBLE = "STOCK_DISPONIBLE", "Stock disponible"
         PRODUCTO_DANADO = "PRODUCTO_DANADO", "Producto dañado"
 
-    nota_credito = models.ForeignKey(
-        NotaCredito, on_delete=models.CASCADE, related_name="detalles"
-    )
+    nota_credito = models.ForeignKey(NotaCredito, on_delete=models.CASCADE, related_name="detalles")
     producto = models.ForeignKey(
-        Producto, on_delete=models.PROTECT, related_name="detalles_nota_credito"
+        "scm.Producto", on_delete=models.PROTECT, related_name="detalles_nota_credito"
     )
     cantidad_devuelta = models.PositiveIntegerField()
     destino = models.CharField(max_length=30, choices=Destino.choices)
 
     class Meta:
+        db_table = "detalle_nota_credito"
         verbose_name = "Detalle de nota de crédito"
         verbose_name_plural = "Detalles de nota de crédito"
+        ordering = ["id"]
 
     def __str__(self):
         return f"{self.cantidad_devuelta} x {self.producto.nombre} ({self.destino})"

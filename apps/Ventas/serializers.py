@@ -1,9 +1,12 @@
 # Serializers del módulo (DRF): traducen JSON <-> objetos y validan.
+# La lógica de negocio (stock, totales, estados) vive en services.py.
 from decimal import Decimal
 
-from django.db import transaction
 from rest_framework import serializers
 
+from apps.SCM.models import Producto
+
+from . import services
 from .models import (
     Anulacion,
     Cliente,
@@ -12,8 +15,13 @@ from .models import (
     NotaCredito,
     OrdenVenta,
     OrdenVentaDetalle,
-    Producto,
 )
+
+
+def _usuario_autenticado(request):
+    """Devuelve el usuario de la request si está autenticado, o None."""
+    usuario = getattr(request, "user", None)
+    return usuario if getattr(usuario, "is_authenticated", False) else None
 
 
 class ClienteSerializer(serializers.ModelSerializer):
@@ -21,16 +29,20 @@ class ClienteSerializer(serializers.ModelSerializer):
     Serializer para el modelo Cliente.
     id_cliente se expone como solo lectura ya que es autogenerado.
     """
- 
+
     class Meta:
         model = Cliente
-        fields = ['id_cliente', 'nombre', 'telefono', 'email', 'direccion', 'cuil', 'condicion_iva', 'estado']
-        read_only_fields = ['id_cliente']
-
-class ProductoSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Producto
-        fields = ["id", "nombre", "precio", "stock"]
+        fields = [
+            "id_cliente",
+            "nombre",
+            "telefono",
+            "email",
+            "direccion",
+            "cuil",
+            "condicion_iva",
+            "estado",
+        ]
+        read_only_fields = ["id_cliente"]
 
 
 class EstadoOrdenVentaSerializer(serializers.ModelSerializer):
@@ -45,7 +57,11 @@ class OrdenVentaDetalleInputSerializer(serializers.Serializer):
     producto = serializers.PrimaryKeyRelatedField(queryset=Producto.objects.all())
     cantidad = serializers.IntegerField(min_value=1)
     descuento = serializers.DecimalField(
-        max_digits=12, decimal_places=2, required=False, default=Decimal("0"), min_value=Decimal("0")
+        max_digits=12,
+        decimal_places=2,
+        required=False,
+        default=Decimal("0"),
+        min_value=Decimal("0"),
     )
 
 
@@ -69,7 +85,8 @@ class OrdenVentaDetalleSerializer(serializers.ModelSerializer):
 
 
 class OrdenVentaSerializer(serializers.ModelSerializer):
-    """Alta de la orden de venta: valida stock, calcula el total y descuenta stock."""
+    """Alta de la orden de venta. La lógica (stock, total, estado inicial) está en
+    services.registrar_orden_venta."""
 
     detalles = OrdenVentaDetalleInputSerializer(many=True, write_only=True)
     items = OrdenVentaDetalleSerializer(source="detalles", many=True, read_only=True)
@@ -99,94 +116,31 @@ class OrdenVentaSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         # Chequeo "optimista" para devolver un error temprano y claro.
-        # El chequeo que realmente vale (con lock) se repite en create(),
-        # ya que entre validate() y create() el stock puede haber cambiado
-        # por otra orden concurrente.
-        detalles = attrs.get("detalles", [])
-        acumulado = {}
-        for item in detalles:
-            producto = item["producto"]
-            acumulado[producto.id] = acumulado.get(producto.id, 0) + item["cantidad"]
+        # El chequeo que realmente vale (con lock) se repite en el service,
+        # ya que entre validate() y create() el stock puede haber cambiado.
+        acumulado = services.acumular_cantidades(attrs.get("detalles", []))
         for producto_id, cantidad in acumulado.items():
             producto = Producto.objects.get(pk=producto_id)
-            if producto.stock < cantidad:
+            if producto.stock_actual < cantidad:
                 raise serializers.ValidationError(
                     {
                         "detalles": (
                             f"Stock insuficiente para '{producto.nombre}' "
-                            f"(disponible: {producto.stock})."
+                            f"(disponible: {producto.stock_actual})."
                         )
                     }
                 )
         return attrs
 
-    @transaction.atomic
     def create(self, validated_data):
-        detalles_data = validated_data.pop("detalles")
-        request = self.context.get("request")
-        usuario = getattr(request, "user", None)
-        usuario = usuario if getattr(usuario, "is_authenticated", False) else None
-
-        # Toda orden nueva arranca en el estado "Pendiente" (se crea si no existe).
-        estado_inicial, _ = EstadoOrdenVenta.objects.get_or_create(nombre="Pendiente")
-
-        orden = OrdenVenta.objects.create(
-            usuario=usuario, estado=estado_inicial, **validated_data
-        )
-
-        # Acumulamos cantidades por producto para bloquear y validar una sola
-        # vez por producto, incluso si aparece en más de un ítem del pedido.
-        cantidad_por_producto = {}
-        for item in detalles_data:
-            producto_id = item["producto"].id
-            cantidad_por_producto[producto_id] = (
-                cantidad_por_producto.get(producto_id, 0) + item["cantidad"]
+        detalles = validated_data.pop("detalles")
+        usuario = _usuario_autenticado(self.context.get("request"))
+        try:
+            return services.registrar_orden_venta(
+                datos=validated_data, detalles=detalles, usuario=usuario
             )
-
-        # select_for_update bloquea las filas de producto involucradas hasta
-        # que termine la transacción, evitando que dos órdenes concurrentes
-        # descuenten el mismo stock y lo dejen en negativo.
-        productos_lockeados = {
-            p.id: p
-            for p in Producto.objects.select_for_update().filter(
-                id__in=cantidad_por_producto.keys()
-            )
-        }
-
-        for producto_id, cantidad_total in cantidad_por_producto.items():
-            producto = productos_lockeados[producto_id]
-            if producto.stock < cantidad_total:
-                raise serializers.ValidationError(
-                    {
-                        "detalles": (
-                            f"Stock insuficiente para '{producto.nombre}' "
-                            f"(disponible: {producto.stock})."
-                        )
-                    }
-                )
-
-        total = Decimal("0")
-        for item in detalles_data:
-            producto = productos_lockeados[item["producto"].id]
-            cantidad = item["cantidad"]
-            descuento = item.get("descuento") or Decimal("0")
-            OrdenVentaDetalle.objects.create(
-                orden_venta=orden,
-                producto=producto,
-                cantidad=cantidad,
-                precio_unitario=producto.precio,
-                descuento=descuento,
-            )
-            total += (producto.precio * cantidad) - descuento
-
-        for producto_id, cantidad_total in cantidad_por_producto.items():
-            producto = productos_lockeados[producto_id]
-            producto.stock -= cantidad_total
-            producto.save(update_fields=["stock"])
-
-        orden.total = total
-        orden.save(update_fields=["total"])
-        return orden
+        except services.StockInsuficienteError as exc:
+            raise serializers.ValidationError({"detalles": str(exc)}) from exc
 
 
 class OrdenVentaUpdateSerializer(serializers.ModelSerializer):
@@ -195,13 +149,22 @@ class OrdenVentaUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = OrdenVenta
-        fields = ["id", "cliente", "forma_pago", "numero_comprobante", "tipo_comprobante", "estado", "fecha", "total"]
+        fields = [
+            "id",
+            "cliente",
+            "forma_pago",
+            "numero_comprobante",
+            "tipo_comprobante",
+            "estado",
+            "fecha",
+            "total",
+        ]
         read_only_fields = ["fecha", "total"]
 
 
 class AnulacionSerializer(serializers.ModelSerializer):
     """Anula una orden de venta (botón 'Anular' en Devoluciones).
-    Al crearse, mueve la orden al estado 'Anulada'."""
+    Al crearse, mueve la orden al estado 'Anulada' (ver services.anular_orden_venta)."""
 
     class Meta:
         model = Anulacion
@@ -213,14 +176,12 @@ class AnulacionSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Esta orden ya fue anulada.")
         return orden_venta
 
-    @transaction.atomic
     def create(self, validated_data):
-        anulacion = Anulacion.objects.create(**validated_data)
-        estado_anulada, _ = EstadoOrdenVenta.objects.get_or_create(nombre="Anulada")
-        orden = validated_data["orden_venta"]
-        orden.estado = estado_anulada
-        orden.save(update_fields=["estado"])
-        return anulacion
+        return services.anular_orden_venta(
+            orden_venta=validated_data["orden_venta"],
+            motivo=validated_data["motivo"],
+            detalle=validated_data.get("detalle"),
+        )
 
 
 class DetalleNotaCreditoInputSerializer(serializers.Serializer):
@@ -247,9 +208,8 @@ class DetalleNotaCreditoSerializer(serializers.ModelSerializer):
 
 
 class NotaCreditoSerializer(serializers.ModelSerializer):
-    """Alta de una nota de crédito (devolución). Si el destino de un ítem
-    es 'stock disponible', repone ese stock al producto. Al crearse, mueve
-    la orden al estado 'Devolución parcial'."""
+    """Alta de una nota de crédito (devolución). La reposición de stock y el cambio
+    de estado a 'Devolución parcial' están en services.registrar_nota_credito."""
 
     detalles = DetalleNotaCreditoInputSerializer(many=True, write_only=True)
     items = DetalleNotaCreditoSerializer(source="detalles", many=True, read_only=True)
@@ -264,21 +224,12 @@ class NotaCreditoSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("La nota de crédito debe tener al menos un producto.")
         return detalles
 
-    @transaction.atomic
     def create(self, validated_data):
-        detalles_data = validated_data.pop("detalles")
-        nota_credito = NotaCredito.objects.create(**validated_data)
-
-        for item in detalles_data:
-            DetalleNotaCredito.objects.create(nota_credito=nota_credito, **item)
-            if item["destino"] == DetalleNotaCredito.Destino.STOCK_DISPONIBLE:
-                producto = Producto.objects.select_for_update().get(pk=item["producto"].id)
-                producto.stock += item["cantidad_devuelta"]
-                producto.save(update_fields=["stock"])
-
-        estado_devolucion, _ = EstadoOrdenVenta.objects.get_or_create(nombre="Devolución parcial")
-        orden = validated_data["orden_venta"]
-        orden.estado = estado_devolucion
-        orden.save(update_fields=["estado"])
-
-        return nota_credito
+        detalles = validated_data.pop("detalles")
+        return services.registrar_nota_credito(
+            orden_venta=validated_data["orden_venta"],
+            monto=validated_data["monto"],
+            saldo_a_favor=validated_data.get("saldo_a_favor", False),
+            detalles=detalles,
+            usuario=_usuario_autenticado(self.context.get("request")),
+        )
