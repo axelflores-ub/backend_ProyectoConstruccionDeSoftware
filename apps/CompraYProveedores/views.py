@@ -13,6 +13,7 @@ from rest_framework.exceptions import ValidationError
 from apps.SCM.services import registrar_recepcion_orden_compra
 
 from .models import (
+    ESTADO_APROBADA,
     ESTADO_RECIBIDA,
     EstadoOrdenCompra,
     OrdenCompra,
@@ -71,6 +72,14 @@ class OrdenCompraViewSet(viewsets.ModelViewSet):
     )
     serializer_class = OrdenCompraSerializer
     ordering_fields = ["id", "fecha", "total"]
+
+    def perform_destroy(self, instance):
+        """No permite eliminar órdenes aprobadas o recibidas."""
+        if instance.estado.nombre in {ESTADO_APROBADA, ESTADO_RECIBIDA}:
+            raise ValidationError(
+                {"detail": "No se puede eliminar una orden aprobada o recibida."}
+            )
+        instance.delete()
 
     def perform_update(self, serializer):
         """Al pasar la orden a "Recibida" se suma lo recibido al stock de SCM.

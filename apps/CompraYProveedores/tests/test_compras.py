@@ -13,6 +13,7 @@ Nota: producto_id se almacena como entero hasta que el módulo SCM esté integra
 import pytest
 from django.contrib.auth import get_user_model
 from django.urls import Resolver404, resolve
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.CompraYProveedores.models import (
@@ -472,6 +473,51 @@ def _estado(client, oc_id):
     respuesta = client.get(f"/api/compras/ordenes-compra/{oc_id}/")
     assert respuesta.status_code == 200
     return respuesta.data
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("nombre_estado", ["Aprobada", "Recibida"])
+def test_no_se_puede_eliminar_orden_aprobada_o_recibida(auth_client, nombre_estado):
+    proveedor = Proveedor.objects.create(
+        nombre="Proveedor Delete",
+        apellido="SA",
+        cuit="20111222333",
+    )
+    estado = EstadoOrdenCompra.objects.get(nombre=nombre_estado)
+    orden = OrdenCompra.objects.create(
+        proveedor=proveedor,
+        estado=estado,
+        fecha=timezone.now(),
+        total="100.00",
+    )
+
+    respuesta = auth_client.delete(f"/api/compras/ordenes-compra/{orden.pk}/")
+
+    assert respuesta.status_code == 400
+    assert "No se puede eliminar una orden aprobada o recibida." in str(respuesta.data)
+    assert OrdenCompra.objects.filter(pk=orden.pk).exists()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("nombre_estado", ["Pendiente", "Rechazada"])
+def test_se_puede_eliminar_orden_pendiente_o_rechazada(auth_client, nombre_estado):
+    proveedor = Proveedor.objects.create(
+        nombre="Proveedor Delete",
+        apellido="SA",
+        cuit="20111222333",
+    )
+    estado = EstadoOrdenCompra.objects.get(nombre=nombre_estado)
+    orden = OrdenCompra.objects.create(
+        proveedor=proveedor,
+        estado=estado,
+        fecha=timezone.now(),
+        total="100.00",
+    )
+
+    respuesta = auth_client.delete(f"/api/compras/ordenes-compra/{orden.pk}/")
+
+    assert respuesta.status_code == 204
+    assert not OrdenCompra.objects.filter(pk=orden.pk).exists()
 
 
 @pytest.mark.django_db
