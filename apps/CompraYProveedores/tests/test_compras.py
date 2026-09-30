@@ -7,7 +7,8 @@ Cubre los siguientes escenarios:
 - Flujo completo de Orden de Compra: crear estado, proveedor, orden y detalles
 - Validación de datos: CUIT único, campos requeridos, formatos correctos
 
-Nota: producto_id se almacena como entero hasta que el módulo SCM esté integrado.
+Nota: el renglón guarda producto_id como entero. El proveedor se vincula
+a uno o más productos de SCM.
 """
 
 import pytest
@@ -22,6 +23,7 @@ from apps.CompraYProveedores.models import (
     OrdenCompraDetalle,
     Proveedor,
 )
+from apps.SCM.models import Producto
 
 
 @pytest.fixture
@@ -41,6 +43,14 @@ def auth_client(api_client, usuario):
     return api_client
 
 
+def _producto(codigo):
+    return Producto.objects.create(
+        codigo=codigo,
+        nombre=f"Producto {codigo}",
+        precio="10.00",
+    )
+
+
 @pytest.mark.django_db
 def test_proveedores_sin_token_da_401(api_client):
     response = api_client.get("/api/compras/proveedores/")
@@ -49,6 +59,7 @@ def test_proveedores_sin_token_da_401(api_client):
 
 @pytest.mark.django_db
 def test_crear_y_listar_proveedor(auth_client):
+    producto = _producto("PRV-001")
     alta = auth_client.post(
         "/api/compras/proveedores/",
         {
@@ -58,12 +69,12 @@ def test_crear_y_listar_proveedor(auth_client):
             "email": "test@corralon.test",
             "cuit": "30712345678",
             "direccion": "Calle 1",
-            "productos": [1],
+            "productos": [producto.pk],
         },
         format="json",
     )
     assert alta.status_code == 201
-    assert 1 in alta.data["productos"]
+    assert producto.pk in alta.data["productos"]
 
     listado = auth_client.get("/api/compras/proveedores/")
     assert listado.status_code == 200
@@ -72,13 +83,14 @@ def test_crear_y_listar_proveedor(auth_client):
 
 @pytest.mark.django_db
 def test_cuit_con_y_sin_guiones_es_el_mismo_proveedor(auth_client):
+    producto = _producto("CUIT-001")
     alta = auth_client.post(
         "/api/compras/proveedores/",
         {
             "nombre": "Madera Norte",
             "apellido": "SA",
             "cuit": "20442152099",
-            "productos": [10],
+            "productos": [producto.pk],
         },
         format="json",
     )
@@ -91,7 +103,7 @@ def test_cuit_con_y_sin_guiones_es_el_mismo_proveedor(auth_client):
             "nombre": "Madera Norte Bis",
             "apellido": "SRL",
             "cuit": "20-44215209-9",
-            "productos": [11],
+            "productos": [producto.pk],
         },
         format="json",
     )
@@ -113,6 +125,37 @@ def test_proveedor_sin_datos_mensajes_claros(auth_client):
     assert "productos" in response.data
 
 
+@pytest.mark.django_db
+def test_un_proveedor_puede_tener_varios_productos_y_compartirlos(auth_client):
+    tabla = _producto("MM-TABLA")
+    clavo = _producto("MM-CLAVO")
+    primero = auth_client.post(
+        "/api/compras/proveedores/",
+        {
+            "nombre": "Corralón Norte",
+            "apellido": "SA",
+            "cuit": "30111000111",
+            "productos": [tabla.pk, clavo.pk],
+        },
+        format="json",
+    )
+    assert primero.status_code == 201
+    assert set(primero.data["productos"]) == {tabla.pk, clavo.pk}
+
+    segundo = auth_client.post(
+        "/api/compras/proveedores/",
+        {
+            "nombre": "Corralón Sur",
+            "apellido": "SA",
+            "cuit": "30111000222",
+            "productos": [tabla.pk],
+        },
+        format="json",
+    )
+    assert segundo.status_code == 201
+    assert segundo.data["productos"] == [tabla.pk]
+
+
 def _id_estado(client, nombre):
     respuesta = client.get("/api/compras/estados-orden-compra/")
     assert respuesta.status_code == 200
@@ -124,13 +167,14 @@ def _id_estado(client, nombre):
 
 @pytest.mark.django_db
 def test_alta_de_orden_trae_renglones_y_queda_pendiente(auth_client):
+    producto = _producto("OC-ALTA")
     proveedor = auth_client.post(
         "/api/compras/proveedores/",
         {
             "nombre": "Proveedor OC",
             "apellido": "SA",
             "cuit": "27111222334",
-            "productos": [2],
+            "productos": [producto.pk],
         },
         format="json",
     )
@@ -142,7 +186,9 @@ def test_alta_de_orden_trae_renglones_y_queda_pendiente(auth_client):
             "proveedor": proveedor.data["proveedor_id"],
             "fecha": "2026-09-04T10:00:00-03:00",
             "total": "15000.00",
-            "detalles": [{"productos": [2], "cantidad": 10, "precio_unitario": "1500.00"}],
+            "detalles": [
+                {"producto_id": producto.pk, "cantidad": 10, "precio_unitario": "1500.00"}
+            ],
         },
         format="json",
     )
@@ -153,7 +199,7 @@ def test_alta_de_orden_trae_renglones_y_queda_pendiente(auth_client):
     assert detalle.data["estado"] == _id_estado(auth_client, "Pendiente")
     assert len(detalle.data["detalles"]) == 1
     renglon = detalle.data["detalles"][0]
-    assert renglon["producto_id"] == 2
+    assert renglon["producto_id"] == producto.pk
     assert renglon["cantidad"] == 10
     assert renglon["precio_unitario"] == "1500.00"
     assert isinstance(renglon["ordencompradetalle_id"], int)
@@ -162,13 +208,14 @@ def test_alta_de_orden_trae_renglones_y_queda_pendiente(auth_client):
 
 @pytest.mark.django_db
 def test_alta_de_orden_no_acepta_otro_estado_que_pendiente(auth_client):
+    producto = _producto("OC-ESTADO")
     proveedor = auth_client.post(
         "/api/compras/proveedores/",
         {
             "nombre": "Proveedor Estado",
             "apellido": "SA",
             "cuit": "30111222335",
-            "productos": [3],
+            "productos": [producto.pk],
         },
         format="json",
     )
@@ -181,7 +228,7 @@ def test_alta_de_orden_no_acepta_otro_estado_que_pendiente(auth_client):
             "estado": _id_estado(auth_client, "Recibida"),
             "fecha": "2026-09-04T10:00:00-03:00",
             "total": "100.00",
-            "detalles": [{"productos": [3], "cantidad": 1, "precio_unitario": "100.00"}],
+            "detalles": [{"producto_id": producto.pk, "cantidad": 1, "precio_unitario": "100.00"}],
         },
         format="json",
     )
@@ -233,7 +280,7 @@ def test_orden_pendiente_no_pasa_directo_a_recibida(auth_client):
             "total": "500.00",
             "detalles": [
                 {
-                    "productos": [producto_id],
+                    "producto_id": producto_id,
                     "cantidad": 1,
                     "precio_unitario": "500.00",
                 }
@@ -258,13 +305,14 @@ def test_orden_pendiente_no_pasa_directo_a_recibida(auth_client):
 
 @pytest.mark.django_db
 def test_orden_rechazada_no_vuelve_a_aprobada(auth_client):
+    producto = _producto("OC-RECHAZO")
     proveedor = auth_client.post(
         "/api/compras/proveedores/",
         {
             "nombre": "Proveedor Rechazo",
             "apellido": "SA",
             "cuit": "24111222337",
-            "productos": [40],
+            "productos": [producto.pk],
         },
         format="json",
     )
@@ -275,6 +323,7 @@ def test_orden_rechazada_no_vuelve_a_aprobada(auth_client):
             "proveedor": proveedor.data["proveedor_id"],
             "fecha": "2026-09-04T10:00:00-03:00",
             "total": "800.00",
+            "detalles": [{"producto_id": producto.pk, "cantidad": 1, "precio_unitario": "800.00"}],
         },
         format="json",
     )
@@ -302,13 +351,14 @@ def test_orden_rechazada_no_vuelve_a_aprobada(auth_client):
 
 @pytest.mark.django_db
 def test_orden_aprobada_no_cambia_el_total(auth_client):
+    producto = _producto("OC-TOTAL")
     proveedor = auth_client.post(
         "/api/compras/proveedores/",
         {
             "nombre": "Proveedor Total",
             "apellido": "SA",
             "cuit": "25111222338",
-            "productos": [41],
+            "productos": [producto.pk],
         },
         format="json",
     )
@@ -319,6 +369,7 @@ def test_orden_aprobada_no_cambia_el_total(auth_client):
             "proveedor": proveedor.data["proveedor_id"],
             "fecha": "2026-09-04T10:00:00-03:00",
             "total": "800.00",
+            "detalles": [{"producto_id": producto.pk, "cantidad": 1, "precio_unitario": "800.00"}],
         },
         format="json",
     )
@@ -346,13 +397,14 @@ def test_orden_aprobada_no_cambia_el_total(auth_client):
 
 @pytest.mark.django_db
 def test_orden_aprobada_no_vuelve_a_pendiente(auth_client):
+    producto = _producto("OC-VUELTA")
     proveedor = auth_client.post(
         "/api/compras/proveedores/",
         {
             "nombre": "Proveedor Vuelta",
             "apellido": "SA",
             "cuit": "26111222339",
-            "productos": [42],
+            "productos": [producto.pk],
         },
         format="json",
     )
@@ -363,6 +415,7 @@ def test_orden_aprobada_no_vuelve_a_pendiente(auth_client):
             "proveedor": proveedor.data["proveedor_id"],
             "fecha": "2026-09-04T10:00:00-03:00",
             "total": "800.00",
+            "detalles": [{"producto_id": producto.pk, "cantidad": 1, "precio_unitario": "800.00"}],
         },
         format="json",
     )
@@ -410,6 +463,7 @@ def test_el_detalle_de_la_orden_no_tiene_endpoint_propio():
 def test_flujo_orden_compra_con_detalle(auth_client):
     # "Pendiente" ya viene cargado por la migración 0003.
     estado = EstadoOrdenCompra.objects.get(nombre="Pendiente")
+    producto = _producto("OC-FLUJO")
 
     proveedor = auth_client.post(
         "/api/compras/proveedores/",
@@ -420,7 +474,7 @@ def test_flujo_orden_compra_con_detalle(auth_client):
             "email": "",
             "cuit": "20111222333",
             "direccion": "",
-            "productos": [2],
+            "productos": [producto.pk],
         },
         format="json",
     )
@@ -432,7 +486,9 @@ def test_flujo_orden_compra_con_detalle(auth_client):
             "estado": estado.estadoordencompra_id,
             "fecha": "2026-09-04T10:00:00-03:00",
             "total": "15000.00",
-            "detalles": [{"productos": [2], "cantidad": 10, "precio_unitario": "1500.00"}],
+            "detalles": [
+                {"producto_id": producto.pk, "cantidad": 10, "precio_unitario": "1500.00"}
+            ],
         },
         format="json",
     )
@@ -457,7 +513,7 @@ def _orden(client, proveedor_id, total, producto_id, cantidad, precio):
             "total": total,
             "detalles": [
                 {
-                    "productos": [producto_id],
+                    "producto_id": producto_id,
                     "cantidad": cantidad,
                     "precio_unitario": precio,
                 }
@@ -582,7 +638,7 @@ def test_recorrido_completo_del_modulo(auth_client):
             "nombre": "Maderas del Norte Bis",
             "apellido": "SRL",
             "cuit": "20-44215209-9",
-            "productos": [producto_id + 1],
+            "productos": [producto_id],
         },
         format="json",
     )
@@ -669,3 +725,125 @@ def test_recorrido_completo_del_modulo(auth_client):
 
     with pytest.raises(Resolver404):
         resolve("/api/compras/ordenes-compra-detalle/")
+
+
+def _proveedor(client, cuit, producto_id):
+    respuesta = client.post(
+        "/api/compras/proveedores/",
+        {
+            "nombre": "Proveedor Renglones",
+            "apellido": "SA",
+            "cuit": cuit,
+            "productos": [producto_id],
+        },
+        format="json",
+    )
+    assert respuesta.status_code == 201, respuesta.data
+    return respuesta.data["proveedor_id"]
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("detalles", [None, []])
+def test_la_orden_exige_al_menos_un_renglon(auth_client, detalles):
+    producto = _producto(f"REN-{detalles is None}")
+    proveedor_id = _proveedor(auth_client, "27111000119", producto.pk)
+    payload = {
+        "proveedor": proveedor_id,
+        "fecha": "2026-09-04T10:00:00-03:00",
+        "total": "100.00",
+    }
+    if detalles is not None:
+        payload["detalles"] = detalles
+
+    alta = auth_client.post("/api/compras/ordenes-compra/", payload, format="json")
+
+    assert alta.status_code == 400
+    assert "La orden debe tener al menos un renglón." in str(alta.data.get("detalles", []))
+    assert OrdenCompra.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_el_total_tiene_que_coincidir_con_los_renglones(auth_client):
+    producto = _producto("TOT-MAL")
+    proveedor_id = _proveedor(auth_client, "27111000227", producto.pk)
+    alta = auth_client.post(
+        "/api/compras/ordenes-compra/",
+        {
+            "proveedor": proveedor_id,
+            "fecha": "2026-09-04T10:00:00-03:00",
+            "total": "999.00",
+            "detalles": [
+                {"producto_id": producto.pk, "cantidad": 2, "precio_unitario": "100.00"},
+            ],
+        },
+        format="json",
+    )
+    assert alta.status_code == 400
+    assert "El total no coincide con la suma de cantidad por precio unitario." in str(
+        alta.data.get("total", [])
+    )
+
+
+@pytest.mark.django_db
+def test_sin_total_lo_calcula_con_la_suma_de_los_renglones(auth_client):
+    producto = _producto("TOT-CALC")
+    otro = _producto("TOT-CALC-2")
+    proveedor_id = _proveedor(auth_client, "27111000335", producto.pk)
+    alta = auth_client.post(
+        "/api/compras/ordenes-compra/",
+        {
+            "proveedor": proveedor_id,
+            "fecha": "2026-09-04T10:00:00-03:00",
+            "detalles": [
+                {"producto_id": producto.pk, "cantidad": 2, "precio_unitario": "10.00"},
+                {"producto_id": otro.pk, "cantidad": 1, "precio_unitario": "5.50"},
+            ],
+        },
+        format="json",
+    )
+    assert alta.status_code == 201, alta.data
+    assert alta.data["total"] == "25.50"
+    assert len(alta.data["detalles"]) == 2
+
+
+@pytest.mark.django_db
+def test_al_reemplazar_renglones_recalcula_el_total(auth_client):
+    producto = _producto("TOT-UPD")
+    proveedor_id = _proveedor(auth_client, "27111000443", producto.pk)
+    oc_id = _orden(auth_client, proveedor_id, "200.00", producto.pk, 2, "100.00")
+
+    cambio = auth_client.patch(
+        f"/api/compras/ordenes-compra/{oc_id}/",
+        {
+            "detalles": [
+                {"producto_id": producto.pk, "cantidad": 3, "precio_unitario": "50.00"},
+            ]
+        },
+        format="json",
+    )
+    assert cambio.status_code == 200, cambio.data
+    assert cambio.data["total"] == "150.00"
+
+    vacio = auth_client.patch(
+        f"/api/compras/ordenes-compra/{oc_id}/",
+        {"detalles": []},
+        format="json",
+    )
+    assert vacio.status_code == 400
+    assert "La orden debe tener al menos un renglón." in str(vacio.data.get("detalles", []))
+    assert _estado(auth_client, oc_id)["total"] == "150.00"
+
+
+@pytest.mark.django_db
+def test_un_total_distinto_en_una_orden_pendiente_se_rechaza(auth_client):
+    producto = _producto("TOT-PEN")
+    proveedor_id = _proveedor(auth_client, "27111000551", producto.pk)
+    oc_id = _orden(auth_client, proveedor_id, "200.00", producto.pk, 2, "100.00")
+
+    cambio = auth_client.patch(
+        f"/api/compras/ordenes-compra/{oc_id}/",
+        {"total": "10.00"},
+        format="json",
+    )
+    assert cambio.status_code == 400
+    assert _estado(auth_client, oc_id)["total"] == "200.00"

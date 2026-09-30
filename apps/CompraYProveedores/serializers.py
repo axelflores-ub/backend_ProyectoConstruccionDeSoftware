@@ -6,6 +6,8 @@ y representaciones JSON, así como para validar datos en las peticiones API.
 Cada serializer corresponde a un modelo del módulo.
 """
 
+from decimal import Decimal
+
 from django.db.models import Value
 from django.db.models.functions import Replace
 from rest_framework import serializers
@@ -29,6 +31,23 @@ TRANSICIONES_ORDEN = {
     ESTADO_RECHAZADA: set(),
     ESTADO_RECIBIDA: set(),
 }
+
+
+def _importe(valor):
+    return Decimal(valor).quantize(Decimal("0.01"))
+
+
+def _suma_renglones(renglones):
+    total = Decimal("0.00")
+    for renglon in renglones:
+        if isinstance(renglon, dict):
+            cantidad = renglon["cantidad"]
+            precio = renglon["precio_unitario"]
+        else:
+            cantidad = renglon.cantidad
+            precio = renglon.precio_unitario
+        total += Decimal(cantidad) * Decimal(precio)
+    return _importe(total)
 
 
 class ProveedorSerializer(serializers.ModelSerializer):
@@ -127,8 +146,6 @@ class ProveedorSerializer(serializers.ModelSerializer):
         return canonico
 
 
-
-
 class EstadoOrdenCompraSerializer(serializers.ModelSerializer):
     class Meta:
         model = EstadoOrdenCompra
@@ -160,7 +177,10 @@ class OrdenCompraSerializer(serializers.ModelSerializer):
             "total",
             "detalles",
         ]
-        extra_kwargs = {"estado": {"required": False}}
+        extra_kwargs = {
+            "estado": {"required": False},
+            "total": {"required": False},
+        }
 
     def validate(self, attrs):
         if self.instance is None and "estado" in attrs:
@@ -184,6 +204,27 @@ class OrdenCompraSerializer(serializers.ModelSerializer):
             }
             if bloqueados:
                 raise serializers.ValidationError(bloqueados)
+
+        mando_renglones = "detalles" in attrs
+        mando_total = "total" in attrs
+        if self.instance is None or mando_renglones or mando_total:
+            if mando_renglones:
+                renglones = attrs["detalles"]
+            elif self.instance is not None:
+                renglones = list(self.instance.detalles.all())
+            else:
+                renglones = []
+            if not renglones:
+                raise serializers.ValidationError(
+                    {"detalles": "La orden debe tener al menos un renglón."}
+                )
+            suma = _suma_renglones(renglones)
+            if mando_total and _importe(attrs["total"]) != suma:
+                raise serializers.ValidationError(
+                    {"total": ("El total no coincide con la suma de cantidad por precio unitario.")}
+                )
+            if not mando_total:
+                attrs["total"] = suma
         return attrs
 
     def create(self, validated_data):

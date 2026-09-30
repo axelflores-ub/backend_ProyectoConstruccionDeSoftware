@@ -32,7 +32,7 @@ class Proveedor(models.Model):
     cuit = models.CharField(max_length=13, unique=True)
     direccion = models.CharField(max_length=200, blank=True)
     productos = models.ManyToManyField(
-        "SCM.Producto",
+        "scm.Producto",
         related_name="proveedores",
         blank=True,
     )
