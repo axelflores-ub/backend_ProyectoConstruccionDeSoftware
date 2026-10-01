@@ -164,7 +164,8 @@ class OrdenVentaUpdateSerializer(serializers.ModelSerializer):
 
 class AnulacionSerializer(serializers.ModelSerializer):
     """Anula una orden de venta (botón 'Anular' en Devoluciones).
-    Al crearse, mueve la orden al estado 'Anulada' (ver services.anular_orden_venta)."""
+    Al crearse, repone el stock pendiente y mueve la orden al estado 'Anulada'
+    (ver services.anular_orden_venta)."""
 
     class Meta:
         model = Anulacion
@@ -177,11 +178,15 @@ class AnulacionSerializer(serializers.ModelSerializer):
         return orden_venta
 
     def create(self, validated_data):
-        return services.anular_orden_venta(
-            orden_venta=validated_data["orden_venta"],
-            motivo=validated_data["motivo"],
-            detalle=validated_data.get("detalle"),
-        )
+        try:
+            return services.anular_orden_venta(
+                orden_venta=validated_data["orden_venta"],
+                motivo=validated_data["motivo"],
+                detalle=validated_data.get("detalle"),
+                usuario=_usuario_autenticado(self.context.get("request")),
+            )
+        except services.OperacionInvalidaError as exc:
+            raise serializers.ValidationError({"orden_venta": str(exc)}) from exc
 
 
 class DetalleNotaCreditoInputSerializer(serializers.Serializer):
@@ -208,8 +213,9 @@ class DetalleNotaCreditoSerializer(serializers.ModelSerializer):
 
 
 class NotaCreditoSerializer(serializers.ModelSerializer):
-    """Alta de una nota de crédito (devolución). La reposición de stock y el cambio
-    de estado a 'Devolución parcial' están en services.registrar_nota_credito."""
+    """Alta de una nota de crédito (devolución). La validación de cantidades, la reposición
+    de stock y el cambio de estado a 'Devolución parcial' están en
+    services.registrar_nota_credito."""
 
     detalles = DetalleNotaCreditoInputSerializer(many=True, write_only=True)
     items = DetalleNotaCreditoSerializer(source="detalles", many=True, read_only=True)
@@ -226,10 +232,13 @@ class NotaCreditoSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         detalles = validated_data.pop("detalles")
-        return services.registrar_nota_credito(
-            orden_venta=validated_data["orden_venta"],
-            monto=validated_data["monto"],
-            saldo_a_favor=validated_data.get("saldo_a_favor", False),
-            detalles=detalles,
-            usuario=_usuario_autenticado(self.context.get("request")),
-        )
+        try:
+            return services.registrar_nota_credito(
+                orden_venta=validated_data["orden_venta"],
+                monto=validated_data["monto"],
+                saldo_a_favor=validated_data.get("saldo_a_favor", False),
+                detalles=detalles,
+                usuario=_usuario_autenticado(self.context.get("request")),
+            )
+        except services.OperacionInvalidaError as exc:
+            raise serializers.ValidationError({"detalles": str(exc)}) from exc

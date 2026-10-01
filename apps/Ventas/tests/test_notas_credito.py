@@ -114,14 +114,95 @@ def test_detalle_de_nota_de_credito_es_solo_lectura(api_client):
     assert response.status_code == 405
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Falta validar que lo devuelto no supere lo vendido (pendiente de implementar).",
-)
 @pytest.mark.django_db
 def test_no_se_puede_devolver_mas_de_lo_vendido(api_client, orden, producto):
-    # La orden vendió 3 unidades; intentar devolver 5 debería dar 400.
+    # La orden vendió 3 unidades; intentar devolver 5 da 400 y no toca el stock.
     response = api_client.post(
         reverse("notacredito-list"), payload(orden, [item(producto, 5)]), format="json"
     )
     assert response.status_code == 400
+    assert "detalles" in response.data
+    producto.refresh_from_db()
+    assert producto.stock_actual == 7
+    assert not MovimientoInventario.objects.filter(
+        tipo=MovimientoInventario.Tipo.DEVOLUCION
+    ).exists()
+
+
+@pytest.mark.django_db
+def test_devolver_exactamente_lo_vendido_pasa(api_client, orden, producto):
+    response = api_client.post(
+        reverse("notacredito-list"), payload(orden, [item(producto, 3)]), format="json"
+    )
+    assert response.status_code == 201
+    producto.refresh_from_db()
+    assert producto.stock_actual == 10
+
+
+@pytest.mark.django_db
+def test_devoluciones_acumuladas_no_pueden_superar_lo_vendido(api_client, orden, producto):
+    url = reverse("notacredito-list")
+    assert (
+        api_client.post(url, payload(orden, [item(producto, 2)]), format="json").status_code == 201
+    )
+
+    # Quedaba 1 disponible: pedir 2 más se pasa de las 3 vendidas.
+    segunda = api_client.post(url, payload(orden, [item(producto, 2)]), format="json")
+    assert segunda.status_code == 400
+    assert "disponibles para devolver 1" in str(segunda.data["detalles"])
+
+    producto.refresh_from_db()
+    assert producto.stock_actual == 9
+
+    # Devolver la que quedaba sí pasa.
+    assert (
+        api_client.post(url, payload(orden, [item(producto, 1)]), format="json").status_code == 201
+    )
+    producto.refresh_from_db()
+    assert producto.stock_actual == 10
+
+
+@pytest.mark.django_db
+def test_producto_repetido_en_la_misma_nota_se_suma(api_client, orden, producto):
+    # 2 + 2 = 4 unidades sobre 3 vendidas: ninguna línea se pasa sola, pero juntas sí.
+    response = api_client.post(
+        reverse("notacredito-list"),
+        payload(orden, [item(producto, 2), item(producto, 2)]),
+        format="json",
+    )
+    assert response.status_code == 400
+    producto.refresh_from_db()
+    assert producto.stock_actual == 7
+
+
+@pytest.mark.django_db
+def test_producto_danado_tambien_cuenta_como_devuelto(api_client, orden, producto):
+    url = reverse("notacredito-list")
+    api_client.post(
+        url, payload(orden, [item(producto, 2, destino="PRODUCTO_DANADO")]), format="json"
+    )
+    response = api_client.post(url, payload(orden, [item(producto, 2)]), format="json")
+    assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_devolver_producto_que_no_pertenece_a_la_orden_falla(api_client, orden, crear_producto):
+    ajeno = crear_producto(codigo="LAD-001", nombre="Ladrillo común")
+    response = api_client.post(
+        reverse("notacredito-list"), payload(orden, [item(ajeno, 1)]), format="json"
+    )
+    assert response.status_code == 400
+    assert "no pertenece" in str(response.data["detalles"])
+
+
+@pytest.mark.django_db
+def test_no_se_puede_devolver_sobre_una_orden_anulada(api_client, orden, producto):
+    api_client.post(
+        reverse("anulacion-list"), {"orden_venta": orden.pk, "motivo": "x"}, format="json"
+    )
+    response = api_client.post(
+        reverse("notacredito-list"), payload(orden, [item(producto, 1)]), format="json"
+    )
+    assert response.status_code == 400
+    producto.refresh_from_db()
+    assert producto.stock_actual == 10  # lo repuso la anulación, la nota no sumó nada

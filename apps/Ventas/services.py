@@ -2,6 +2,7 @@
 from decimal import Decimal
 
 from django.db import transaction
+from django.db.models import Sum
 
 from apps.SCM.models import MovimientoInventario, Producto
 
@@ -25,6 +26,10 @@ class StockInsuficienteError(Exception):
         )
 
 
+class OperacionInvalidaError(Exception):
+    """La devolución o anulación no cumple las reglas de negocio."""
+
+
 def _registrar_movimiento(*, producto, usuario, tipo, cantidad, observacion):
     """Deja constancia en el historial de inventario de SCM (cantidad siempre positiva;
     el sentido lo da el tipo: SALIDA descuenta, DEVOLUCION repone)."""
@@ -46,6 +51,73 @@ def acumular_cantidades(items):
         producto_id = item["producto"].id
         acumulado[producto_id] = acumulado.get(producto_id, 0) + item["cantidad"]
     return acumulado
+
+
+def _vendido_por_producto(orden_venta):
+    filas = (
+        OrdenVentaDetalle.objects.filter(orden_venta=orden_venta)
+        .values("producto_id")
+        .annotate(total=Sum("cantidad"))
+    )
+    return {f["producto_id"]: f["total"] for f in filas}
+
+
+def _devuelto_por_producto(orden_venta):
+    """Unidades devueltas en todas las notas de crédito de la orden (cualquier destino)."""
+    filas = (
+        DetalleNotaCredito.objects.filter(nota_credito__orden_venta=orden_venta)
+        .values("producto_id")
+        .annotate(total=Sum("cantidad_devuelta"))
+    )
+    return {f["producto_id"]: f["total"] for f in filas}
+
+
+def _orden_bloqueada(orden_venta):
+    """Bloquea la orden hasta el fin de la transacción: serializa notas de crédito
+    y anulaciones concurrentes sobre la misma orden."""
+    return OrdenVenta.objects.select_for_update().get(pk=orden_venta.pk)
+
+
+def _validar_orden_no_anulada(orden_venta):
+    if Anulacion.objects.filter(orden_venta=orden_venta).exists():
+        raise OperacionInvalidaError("La orden ya fue anulada.")
+
+
+def _validar_devoluciones(orden_venta, detalles):
+    """La cantidad a devolver no puede superar lo vendido menos lo ya devuelto."""
+    vendido = _vendido_por_producto(orden_venta)
+    devuelto = _devuelto_por_producto(orden_venta)
+    nombres = {item["producto"].id: item["producto"].nombre for item in detalles}
+    pedido = {}
+    for item in detalles:
+        pid = item["producto"].id
+        pedido[pid] = pedido.get(pid, 0) + item["cantidad_devuelta"]
+
+    for pid, cantidad in pedido.items():
+        if pid not in vendido:
+            raise OperacionInvalidaError(f"El producto '{nombres[pid]}' no pertenece a la orden.")
+        ya_devuelto = devuelto.get(pid, 0)
+        disponible = vendido[pid] - ya_devuelto
+        if cantidad > disponible:
+            raise OperacionInvalidaError(
+                f"No se pueden devolver {cantidad} unidades de '{nombres[pid]}': "
+                f"vendidas {vendido[pid]}, ya devueltas {ya_devuelto}, "
+                f"disponibles para devolver {disponible}."
+            )
+
+
+def _reponer_stock(*, producto, cantidad, usuario, observacion):
+    """Suma stock y deja el movimiento DEVOLUCION. El producto debe venir ya bloqueado
+    (select_for_update)."""
+    producto.stock_actual += cantidad
+    producto.save(update_fields=["stock_actual"])
+    return _registrar_movimiento(
+        producto=producto,
+        usuario=usuario,
+        tipo=MovimientoInventario.Tipo.DEVOLUCION,
+        cantidad=cantidad,
+        observacion=observacion,
+    )
 
 
 @transaction.atomic
@@ -102,8 +174,30 @@ def registrar_orden_venta(*, datos, detalles, usuario=None):
 
 
 @transaction.atomic
-def anular_orden_venta(*, orden_venta, motivo, detalle=None):
-    """Registra la anulación y mueve la orden al estado 'Anulada'."""
+def anular_orden_venta(*, orden_venta, motivo, detalle=None, usuario):
+    """Registra la anulación, repone el stock pendiente de devolver (vendido menos lo ya
+    devuelto en notas de crédito) con movimientos DEVOLUCION y pasa la orden a 'Anulada'."""
+    orden_venta = _orden_bloqueada(orden_venta)
+    _validar_orden_no_anulada(orden_venta)
+
+    vendido = _vendido_por_producto(orden_venta)
+    devuelto = _devuelto_por_producto(orden_venta)
+    a_reponer = {}
+    for pid, cantidad in vendido.items():
+        pendiente = cantidad - devuelto.get(pid, 0)
+        if pendiente > 0:
+            a_reponer[pid] = pendiente
+
+    # order_by("id") para bloquear siempre en el mismo orden y evitar deadlocks
+    productos = Producto.objects.select_for_update().filter(id__in=a_reponer).order_by("id")
+    for producto in productos:
+        _reponer_stock(
+            producto=producto,
+            cantidad=a_reponer[producto.id],
+            usuario=usuario,
+            observacion=f"Anulación - orden #{orden_venta.pk}",
+        )
+
     anulacion = Anulacion.objects.create(orden_venta=orden_venta, motivo=motivo, detalle=detalle)
     estado_anulada, _ = EstadoOrdenVenta.objects.get_or_create(nombre="Anulada")
     orden_venta.estado = estado_anulada
@@ -113,8 +207,13 @@ def anular_orden_venta(*, orden_venta, motivo, detalle=None):
 
 @transaction.atomic
 def registrar_nota_credito(*, orden_venta, monto, saldo_a_favor, detalles, usuario):
-    """Crea la nota de crédito, repone stock de lo devuelto a 'stock disponible'
-    (con un movimiento de inventario DEVOLUCION) y mueve la orden a 'Devolución parcial'."""
+    """Valida que no se devuelva más de lo vendido (contando devoluciones previas), crea la
+    nota de crédito, repone stock de lo devuelto a 'stock disponible' (movimiento
+    DEVOLUCION) y mueve la orden a 'Devolución parcial'."""
+    orden_venta = _orden_bloqueada(orden_venta)
+    _validar_orden_no_anulada(orden_venta)
+    _validar_devoluciones(orden_venta, detalles)
+
     nota_credito = NotaCredito.objects.create(
         orden_venta=orden_venta, monto=monto, saldo_a_favor=saldo_a_favor
     )
@@ -123,13 +222,10 @@ def registrar_nota_credito(*, orden_venta, monto, saldo_a_favor, detalles, usuar
         DetalleNotaCredito.objects.create(nota_credito=nota_credito, **item)
         if item["destino"] == DetalleNotaCredito.Destino.STOCK_DISPONIBLE:
             producto = Producto.objects.select_for_update().get(pk=item["producto"].id)
-            producto.stock_actual += item["cantidad_devuelta"]
-            producto.save(update_fields=["stock_actual"])
-            _registrar_movimiento(
+            _reponer_stock(
                 producto=producto,
-                usuario=usuario,
-                tipo=MovimientoInventario.Tipo.DEVOLUCION,
                 cantidad=item["cantidad_devuelta"],
+                usuario=usuario,
                 observacion=f"Devolución - nota de crédito #{nota_credito.pk}",
             )
 
