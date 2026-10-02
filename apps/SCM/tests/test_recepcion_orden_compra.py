@@ -13,7 +13,8 @@ pytestmark = pytest.mark.django_db
 
 @pytest.fixture
 def orden_pendiente(producto):
-    proveedor = Proveedor.objects.create(nombre="Prov", cuit="20111222333", producto_id=producto.id)
+    proveedor = Proveedor.objects.create(nombre="Prov", cuit="20111222333")
+    proveedor.productos.add(producto)
     orden = OrdenCompra.objects.create(
         proveedor=proveedor,
         estado=EstadoOrdenCompra.objects.get(nombre="Pendiente"),
@@ -56,7 +57,8 @@ def test_marcar_recibida_suma_stock_y_deja_movimiento(api_client, producto, orde
 
 
 def test_orden_recibida_no_puede_cambiar_de_estado(api_client, producto, orden_pendiente):
-    cambiar_estado(api_client, orden_pendiente, "Recibida")
+    assert cambiar_estado(api_client, orden_pendiente, "Aprobada").status_code == 200
+    assert cambiar_estado(api_client, orden_pendiente, "Recibida").status_code == 200
     response = cambiar_estado(api_client, orden_pendiente, "Pendiente")
     assert response.status_code == 400
 
@@ -70,11 +72,12 @@ def test_recibida_con_producto_inexistente_no_cambia_nada(api_client, producto, 
     OrdenCompraDetalle.objects.create(
         orden_compra=orden_pendiente, producto_id=99999, cantidad=1, precio_unitario="1.00"
     )
+    assert cambiar_estado(api_client, orden_pendiente, "Aprobada").status_code == 200
     response = cambiar_estado(api_client, orden_pendiente, "Recibida")
     assert response.status_code == 400
 
     orden_pendiente.refresh_from_db()
-    assert orden_pendiente.estado.nombre == "Pendiente"
+    assert orden_pendiente.estado.nombre == "Aprobada"
     producto.refresh_from_db()
     assert producto.stock_actual == 20
     assert MovimientoInventario.objects.count() == 0

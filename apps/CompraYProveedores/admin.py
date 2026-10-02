@@ -37,6 +37,7 @@ class ProveedorAdmin(admin.ModelAdmin):
     """
     list_display = ("proveedor_id", "nombre", "apellido", "cuit", "telefono", "email")
     search_fields = ("nombre", "apellido", "cuit", "email", "telefono")
+    filter_horizontal = ("productos",)
 
 
 @admin.register(EstadoOrdenCompra)
