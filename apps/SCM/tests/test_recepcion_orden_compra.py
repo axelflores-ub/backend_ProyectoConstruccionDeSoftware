@@ -13,7 +13,8 @@ pytestmark = pytest.mark.django_db
 
 @pytest.fixture
 def orden_pendiente(producto):
-    proveedor = Proveedor.objects.create(nombre="Prov", cuit="20111222333", producto_id=producto.id)
+    proveedor = Proveedor.objects.create(nombre="Prov", cuit="20111222333")
+    proveedor.productos.add(producto)
     orden = OrdenCompra.objects.create(
         proveedor=proveedor,
         estado=EstadoOrdenCompra.objects.get(nombre="Pendiente"),

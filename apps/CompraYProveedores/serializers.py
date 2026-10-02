@@ -50,6 +50,32 @@ def _suma_renglones(renglones):
     return _importe(total)
 
 
+def _producto_id(renglon):
+    if isinstance(renglon, dict):
+        return renglon["producto_id"]
+    return renglon.producto_id
+
+
+def _validar_productos_del_proveedor(proveedor, renglones):
+    """Cada renglón tiene que ser un producto del catálogo de ese proveedor."""
+    permitidos = set(proveedor.productos.values_list("pk", flat=True))
+    ajenos = []
+    vistos = set()
+    for renglon in renglones:
+        producto_id = _producto_id(renglon)
+        if producto_id not in permitidos and producto_id not in vistos:
+            vistos.add(producto_id)
+            ajenos.append(producto_id)
+    if not ajenos:
+        return
+    if len(ajenos) == 1:
+        mensaje = f"El producto {ajenos[0]} no está asociado al proveedor."
+    else:
+        lista = ", ".join(str(producto_id) for producto_id in ajenos)
+        mensaje = f"Los productos {lista} no están asociados al proveedor."
+    raise serializers.ValidationError({"detalles": mensaje})
+
+
 class ProveedorSerializer(serializers.ModelSerializer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -207,7 +233,8 @@ class OrdenCompraSerializer(serializers.ModelSerializer):
 
         mando_renglones = "detalles" in attrs
         mando_total = "total" in attrs
-        if self.instance is None or mando_renglones or mando_total:
+        mando_proveedor = "proveedor" in attrs
+        if self.instance is None or mando_renglones or mando_total or mando_proveedor:
             if mando_renglones:
                 renglones = attrs["detalles"]
             elif self.instance is not None:
@@ -218,6 +245,10 @@ class OrdenCompraSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"detalles": "La orden debe tener al menos un renglón."}
                 )
+            proveedor = attrs.get("proveedor")
+            if proveedor is None and self.instance is not None:
+                proveedor = self.instance.proveedor
+            _validar_productos_del_proveedor(proveedor, renglones)
             suma = _suma_renglones(renglones)
             if mando_total and _importe(attrs["total"]) != suma:
                 raise serializers.ValidationError(

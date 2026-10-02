@@ -728,13 +728,14 @@ def test_recorrido_completo_del_modulo(auth_client):
 
 
 def _proveedor(client, cuit, producto_id):
+    productos = producto_id if isinstance(producto_id, list) else [producto_id]
     respuesta = client.post(
         "/api/compras/proveedores/",
         {
             "nombre": "Proveedor Renglones",
             "apellido": "SA",
             "cuit": cuit,
-            "productos": [producto_id],
+            "productos": productos,
         },
         format="json",
     )
@@ -788,7 +789,7 @@ def test_el_total_tiene_que_coincidir_con_los_renglones(auth_client):
 def test_sin_total_lo_calcula_con_la_suma_de_los_renglones(auth_client):
     producto = _producto("TOT-CALC")
     otro = _producto("TOT-CALC-2")
-    proveedor_id = _proveedor(auth_client, "27111000335", producto.pk)
+    proveedor_id = _proveedor(auth_client, "27111000335", [producto.pk, otro.pk])
     alta = auth_client.post(
         "/api/compras/ordenes-compra/",
         {
@@ -847,3 +848,77 @@ def test_un_total_distinto_en_una_orden_pendiente_se_rechaza(auth_client):
     )
     assert cambio.status_code == 400
     assert _estado(auth_client, oc_id)["total"] == "200.00"
+
+
+@pytest.mark.django_db
+def test_la_orden_rechaza_un_producto_que_el_proveedor_no_tiene(auth_client):
+    propio = _producto("CAT-OK")
+    ajeno = _producto("CAT-NO")
+    proveedor_id = _proveedor(auth_client, "27111000660", propio.pk)
+    alta = auth_client.post(
+        "/api/compras/ordenes-compra/",
+        {
+            "proveedor": proveedor_id,
+            "fecha": "2026-09-04T10:00:00-03:00",
+            "detalles": [
+                {"producto_id": ajeno.pk, "cantidad": 1, "precio_unitario": "10.00"},
+            ],
+        },
+        format="json",
+    )
+    assert alta.status_code == 400
+    assert f"El producto {ajeno.pk} no está asociado al proveedor." in str(
+        alta.data.get("detalles", [])
+    )
+    assert OrdenCompra.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_al_cambiar_el_proveedor_los_renglones_tienen_que_ser_de_su_catalogo(auth_client):
+    producto = _producto("CAT-PROV")
+    otro = _producto("CAT-OTRO")
+    proveedor_id = _proveedor(auth_client, "27111000778", producto.pk)
+    otro_proveedor = auth_client.post(
+        "/api/compras/proveedores/",
+        {
+            "nombre": "Otro proveedor",
+            "apellido": "SA",
+            "cuit": "27111000886",
+            "productos": [otro.pk],
+        },
+        format="json",
+    )
+    assert otro_proveedor.status_code == 201
+    oc_id = _orden(auth_client, proveedor_id, "10.00", producto.pk, 1, "10.00")
+
+    cambio = auth_client.patch(
+        f"/api/compras/ordenes-compra/{oc_id}/",
+        {"proveedor": otro_proveedor.data["proveedor_id"]},
+        format="json",
+    )
+    assert cambio.status_code == 400
+    assert f"El producto {producto.pk} no está asociado al proveedor." in str(
+        cambio.data.get("detalles", [])
+    )
+    assert _estado(auth_client, oc_id)["proveedor"] == proveedor_id
+
+
+@pytest.mark.django_db
+def test_se_puede_cargar_otro_producto_del_mismo_proveedor(auth_client):
+    primero = _producto("CAT-1")
+    segundo = _producto("CAT-2")
+    proveedor_id = _proveedor(auth_client, "27111000994", [primero.pk, segundo.pk])
+    oc_id = _orden(auth_client, proveedor_id, "10.00", primero.pk, 1, "10.00")
+
+    cambio = auth_client.patch(
+        f"/api/compras/ordenes-compra/{oc_id}/",
+        {
+            "detalles": [
+                {"producto_id": segundo.pk, "cantidad": 2, "precio_unitario": "10.00"},
+            ]
+        },
+        format="json",
+    )
+    assert cambio.status_code == 200, cambio.data
+    assert cambio.data["detalles"][0]["producto_id"] == segundo.pk
+    assert cambio.data["total"] == "20.00"
