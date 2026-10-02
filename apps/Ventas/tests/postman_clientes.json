@@ -1,0 +1,464 @@
+{
+  "info": {
+    "name": "Ventas - Clientes (ABM)",
+    "description": "Colección para los endpoints de clientes: listar, ver, crear (POST), modificar (PUT) y baja lógica (DELETE).\n\nAutenticación JWT: corré primero '0. Autenticación > Login'. Completá las variables 'usuario' y 'password'. Corré 'Crear cliente' antes de los requests que usan {{cliente_id}} (lo guarda automáticamente).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "host",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "base_url",
+      "value": "{{host}}/api/ventas",
+      "type": "string"
+    },
+    {
+      "key": "usuario",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "password",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "cliente_id",
+      "value": "1",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "0. Autenticación",
+      "item": [
+        {
+          "name": "Login (obtener JWT)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data.access) {",
+                  "    pm.collectionVariables.set('access_token', data.access);",
+                  "} else {",
+                  "    console.error('La respuesta no trajo access token:', data);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{usuario}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{host}}/api/auth/login/",
+              "host": [
+                "{{host}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login",
+                ""
+              ]
+            },
+            "description": "Corré este request primero. Completá las variables 'usuario' y 'password'. Guarda el token en {{access_token}}."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Clientes",
+      "item": [
+        {
+          "name": "Listar clientes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/clientes/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "clientes",
+                ""
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear cliente",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/clientes/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "clientes",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Cliente Postman\",\n  \"telefono\": \"1122334455\",\n  \"email\": \"postman@test.com\",\n  \"direccion\": \"Calle Test 123\",\n  \"cuil\": \"20-12345678-9\",\n  \"condicion_iva\": \"Monotributo\"\n}"
+            },
+            "description": "Alta de cliente. Siempre queda con estado 'AC'. Guarda el id en {{cliente_id}}."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', function () { pm.response.to.have.status(201); });",
+                  "const c = pm.response.json();",
+                  "pm.test('Queda activo (AC)', function () { pm.expect(c.estado).to.eql('AC'); });",
+                  "pm.test('Devuelve id_cliente', function () { pm.expect(c.id_cliente).to.be.a('number'); });",
+                  "pm.collectionVariables.set('cliente_id', c.id_cliente);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear cliente - solo nombre (mínimo)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/clientes/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "clientes",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Cliente Mínimo\"\n}"
+            },
+            "description": "Solo 'nombre' es obligatorio."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', function () { pm.response.to.have.status(201); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear cliente intentando estado OF (queda AC)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/clientes/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "clientes",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Intento de baja\",\n  \"estado\": \"OF\"\n}"
+            },
+            "description": "Aunque se envíe estado 'OF', el cliente nuevo se crea activo."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', function () { pm.response.to.have.status(201); });",
+                  "pm.test('Estado forzado a AC', function () { pm.expect(pm.response.json().estado).to.eql('AC'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear cliente sin nombre (debe dar 400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/clientes/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "clientes",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"sinnombre@test.com\"\n}"
+            },
+            "description": "Caso de error esperado: 400, el campo 'nombre' es requerido."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Error en nombre', function () { pm.expect(pm.response.json()).to.have.property('nombre'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear cliente sin token (debe dar 401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/clientes/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "clientes",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Anonimo\"\n}"
+            },
+            "description": "Sin Authorization. Caso de error esperado: 401.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', function () { pm.response.to.have.status(401); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ver un cliente",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/clientes/{{cliente_id}}/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "clientes",
+                "{{cliente_id}}",
+                ""
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ver cliente inexistente (debe dar 404)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/clientes/999999/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "clientes",
+                "999999",
+                ""
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', function () { pm.response.to.have.status(404); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Modificar cliente",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/clientes/{{cliente_id}}/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "clientes",
+                "{{cliente_id}}",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Cliente Modificado\",\n  \"telefono\": \"1199999999\",\n  \"email\": \"modificado@test.com\",\n  \"direccion\": \"Nueva dirección 456\",\n  \"cuil\": \"27-98765432-1\",\n  \"condicion_iva\": \"Responsable Inscripto\",\n  \"estado\": \"AC\"\n}"
+            },
+            "description": "PUT completo: requiere 'nombre'."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Baja lógica de cliente",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/clientes/{{cliente_id}}/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "clientes",
+                "{{cliente_id}}",
+                ""
+              ]
+            },
+            "description": "No borra el registro: setea estado = 'OF'."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Cliente en baja', function () { pm.expect(pm.response.json().cliente.estado).to.eql('OF'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
