@@ -18,10 +18,12 @@ from .models import (
 
 
 class ProveedorProductoInline(admin.TabularInline):
-    """Precio de compra de cada producto que vende el proveedor."""
+    """Precio de compra de cada producto. activo=0 es la baja: la fila no se borra."""
 
     model = ProveedorProducto
     extra = 0
+    can_delete = False
+    fields = ("producto", "precio_compra", "activo")
 
 
 class OrdenCompraDetalleInline(admin.TabularInline):

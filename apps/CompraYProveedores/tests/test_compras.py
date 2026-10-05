@@ -11,6 +11,8 @@ Nota: el renglón guarda producto_id como entero. El proveedor se vincula
 a uno o más productos de SCM, con el precio de compra en cada vínculo.
 """
 
+from decimal import Decimal
+
 import pytest
 from django.contrib.auth import get_user_model
 from django.urls import Resolver404, resolve
@@ -295,6 +297,116 @@ def test_un_vinculo_sin_precio_se_lee_en_null(auth_client):
     detalle = auth_client.get(f"/api/compras/proveedores/{proveedor.pk}/")
     assert detalle.status_code == 200
     assert detalle.data["productos"] == [{"producto_id": producto.pk, "precio_compra": None}]
+
+
+@pytest.mark.django_db
+def test_sacar_un_producto_desactiva_el_vinculo_sin_borrarlo(auth_client):
+    tabla = _producto("BAJA-TABLA")
+    clavo = _producto("BAJA-CLAVO")
+    alta = auth_client.post(
+        "/api/compras/proveedores/",
+        {
+            "nombre": "Corralón Baja",
+            "apellido": "SA",
+            "cuit": "30111000552",
+            "productos": _por_producto(
+                [
+                    {"producto_id": tabla.pk, "precio_compra": "1500.00"},
+                    {"producto_id": clavo.pk, "precio_compra": "25.50"},
+                ]
+            ),
+        },
+        format="json",
+    )
+    assert alta.status_code == 201, alta.data
+    proveedor_id = alta.data["proveedor_id"]
+    fila_tabla = ProveedorProducto.objects.get(proveedor_id=proveedor_id, producto=tabla)
+    fila_clavo = ProveedorProducto.objects.get(proveedor_id=proveedor_id, producto=clavo)
+    id_tabla = fila_tabla.pk
+    id_clavo = fila_clavo.pk
+    assert fila_tabla.activo == 1
+    assert fila_clavo.activo == 1
+
+    oc_id = _orden(auth_client, proveedor_id, "25.50", clavo.pk, 1, "25.50")
+
+    baja = auth_client.patch(
+        f"/api/compras/proveedores/{proveedor_id}/",
+        {"productos": _catalogo(tabla.pk, "1600.00")},
+        format="json",
+    )
+    assert baja.status_code == 200, baja.data
+    assert baja.data["productos"] == _catalogo(tabla.pk, "1600.00")
+    assert ProveedorProducto.objects.filter(proveedor_id=proveedor_id).count() == 2
+
+    fila_tabla.refresh_from_db()
+    fila_clavo.refresh_from_db()
+    assert fila_tabla.pk == id_tabla
+    assert fila_clavo.pk == id_clavo
+    assert fila_tabla.activo == 1
+    assert fila_tabla.precio_compra == Decimal("1600.00")
+    assert fila_clavo.activo == 0
+    assert fila_clavo.precio_compra == Decimal("25.50")
+
+    listado = auth_client.get("/api/compras/proveedores/")
+    guardado = next(
+        item for item in listado.data["results"] if item["proveedor_id"] == proveedor_id
+    )
+    assert guardado["productos"] == _catalogo(tabla.pk, "1600.00")
+
+    rechazada = auth_client.post(
+        "/api/compras/ordenes-compra/",
+        {
+            "proveedor": proveedor_id,
+            "fecha": "2026-09-04T10:00:00-03:00",
+            "detalles": [
+                {"producto_id": clavo.pk, "cantidad": 1, "precio_unitario": "25.50"},
+            ],
+        },
+        format="json",
+    )
+    assert rechazada.status_code == 400
+    assert f"El producto {clavo.pk} no está asociado al proveedor." in str(
+        rechazada.data.get("detalles", [])
+    )
+
+    aprobada = auth_client.patch(
+        f"/api/compras/ordenes-compra/{oc_id}/",
+        {"estado": _id_estado(auth_client, "Aprobada")},
+        format="json",
+    )
+    assert aprobada.status_code == 200, aprobada.data
+    recibida = auth_client.patch(
+        f"/api/compras/ordenes-compra/{oc_id}/",
+        {"estado": _id_estado(auth_client, "Recibida")},
+        format="json",
+    )
+    assert recibida.status_code == 200, recibida.data
+    stock = auth_client.get(f"/api/scm/productos/{clavo.pk}/")
+    assert stock.data["stock_actual"] == 1
+
+    reactiva = auth_client.patch(
+        f"/api/compras/proveedores/{proveedor_id}/",
+        {
+            "productos": _por_producto(
+                [
+                    {"producto_id": tabla.pk, "precio_compra": "1600.00"},
+                    {"producto_id": clavo.pk, "precio_compra": "30.00"},
+                ]
+            )
+        },
+        format="json",
+    )
+    assert reactiva.status_code == 200, reactiva.data
+    assert reactiva.data["productos"] == _por_producto(
+        [
+            {"producto_id": tabla.pk, "precio_compra": "1600.00"},
+            {"producto_id": clavo.pk, "precio_compra": "30.00"},
+        ]
+    )
+    assert ProveedorProducto.objects.filter(proveedor_id=proveedor_id).count() == 2
+    fila_clavo.refresh_from_db()
+    assert fila_clavo.activo == 1
+    assert fila_clavo.precio_compra == Decimal("30.00")
 
 
 def _id_estado(client, nombre):

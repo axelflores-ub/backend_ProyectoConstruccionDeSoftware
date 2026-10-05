@@ -22,6 +22,8 @@ from .models import (
     ESTADO_PENDIENTE,
     ESTADO_RECHAZADA,
     ESTADO_RECIBIDA,
+    VINCULO_ACTIVO,
+    VINCULO_INACTIVO,
     EstadoOrdenCompra,
     OrdenCompra,
     OrdenCompraDetalle,
@@ -61,8 +63,10 @@ def _producto_id(renglon):
 
 
 def _validar_productos_del_proveedor(proveedor, renglones):
-    """Cada renglón tiene que ser un producto del catálogo de ese proveedor."""
-    permitidos = set(proveedor.productos.values_list("pk", flat=True))
+    """Cada renglón tiene que ser un producto vigente de ese proveedor."""
+    permitidos = set(
+        proveedor.vinculos.filter(activo=VINCULO_ACTIVO).values_list("producto_id", flat=True)
+    )
     ajenos = []
     vistos = set()
     for renglon in renglones:
@@ -122,6 +126,7 @@ class ProductosConPrecioField(serializers.Field):
                 ),
             }
             for vinculo in value.instance.vinculos.all()
+            if vinculo.activo == VINCULO_ACTIVO
         ]
 
     def to_internal_value(self, data):
@@ -251,17 +256,35 @@ class ProveedorSerializer(serializers.ModelSerializer):
         raise serializers.ValidationError(f"Los productos {lista} no existen.")
 
     def _reemplazar_productos(self, proveedor, productos):
-        proveedor.vinculos.all().delete()
-        ProveedorProducto.objects.bulk_create(
-            [
-                ProveedorProducto(
-                    proveedor=proveedor,
-                    producto_id=item["producto_id"],
-                    precio_compra=item["precio_compra"],
+        """Sincroniza el catálogo. Sacar un producto pone activo=0; la fila queda."""
+        nuevos = {item["producto_id"]: item["precio_compra"] for item in productos}
+        existentes = {vinculo.producto_id: vinculo for vinculo in proveedor.vinculos.all()}
+        altas = []
+        cambios = []
+        for producto_id, precio in nuevos.items():
+            vinculo = existentes.get(producto_id)
+            if vinculo is None:
+                altas.append(
+                    ProveedorProducto(
+                        proveedor=proveedor,
+                        producto_id=producto_id,
+                        precio_compra=precio,
+                        activo=VINCULO_ACTIVO,
+                    )
                 )
-                for item in productos
-            ]
-        )
+                continue
+            if vinculo.precio_compra != precio or vinculo.activo != VINCULO_ACTIVO:
+                vinculo.precio_compra = precio
+                vinculo.activo = VINCULO_ACTIVO
+                cambios.append(vinculo)
+        for producto_id, vinculo in existentes.items():
+            if producto_id not in nuevos and vinculo.activo != VINCULO_INACTIVO:
+                vinculo.activo = VINCULO_INACTIVO
+                cambios.append(vinculo)
+        if altas:
+            ProveedorProducto.objects.bulk_create(altas)
+        if cambios:
+            ProveedorProducto.objects.bulk_update(cambios, ["precio_compra", "activo"])
 
     def create(self, validated_data):
         productos = validated_data.pop("productos")

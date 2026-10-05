@@ -22,6 +22,10 @@ ESTADOS_ORDEN_COMPRA = [
     ESTADO_RECIBIDA,
 ]
 
+# proveedor_productos.activo: 1 vigente, 0 dado de baja. La fila no se borra.
+VINCULO_ACTIVO = 1
+VINCULO_INACTIVO = 0
+
 
 class ProveedorProducto(models.Model):
     """Vínculo proveedor–producto. El precio de compra es de esta relación."""
@@ -39,6 +43,10 @@ class ProveedorProducto(models.Model):
         related_name="vinculos_proveedor",
     )
     precio_compra = models.DecimalField(max_digits=12, decimal_places=2, null=True)
+    activo = models.PositiveSmallIntegerField(
+        default=VINCULO_ACTIVO,
+        choices=[(VINCULO_ACTIVO, "Activo"), (VINCULO_INACTIVO, "De baja")],
+    )
 
     class Meta:
         db_table = "proveedor_productos"
@@ -49,7 +57,11 @@ class ProveedorProducto(models.Model):
             models.UniqueConstraint(
                 fields=["proveedor", "producto"],
                 name="proveedor_productos_proveedor_id_producto_id_022f31af_uniq",
-            )
+            ),
+            models.CheckConstraint(
+                condition=models.Q(activo__in=[VINCULO_ACTIVO, VINCULO_INACTIVO]),
+                name="proveedor_productos_activo_es_0_o_1",
+            ),
         ]
 
     def __str__(self):
