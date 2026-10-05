@@ -39,7 +39,7 @@ class ProveedorViewSet(viewsets.ModelViewSet):
         ordering_fields: Campos por los que se puede ordenar.
     """
 
-    queryset = Proveedor.objects.all()
+    queryset = Proveedor.objects.prefetch_related("vinculos")
     serializer_class = ProveedorSerializer
     search_fields = ["nombre", "email", "telefono"]
     ordering_fields = ["id", "nombre"]

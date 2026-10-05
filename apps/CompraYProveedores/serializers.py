@@ -8,10 +8,13 @@ Cada serializer corresponde a un modelo del módulo.
 
 from decimal import Decimal
 
+from django.db import transaction
 from django.db.models import Value
 from django.db.models.functions import Replace
 from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
+
+from apps.SCM.models import Producto
 
 from .cuit import cuit_canonico
 from .models import (
@@ -23,6 +26,7 @@ from .models import (
     OrdenCompra,
     OrdenCompraDetalle,
     Proveedor,
+    ProveedorProducto,
 )
 
 TRANSICIONES_ORDEN = {
@@ -76,7 +80,67 @@ def _validar_productos_del_proveedor(proveedor, renglones):
     raise serializers.ValidationError({"detalles": mensaje})
 
 
+class ProductoDelProveedorSerializer(serializers.Serializer):
+    producto_id = serializers.IntegerField(
+        min_value=1,
+        error_messages={
+            "required": "Falta indicar el producto.",
+            "invalid": "El formato de productos no es válido.",
+            "min_value": "El formato de productos no es válido.",
+        },
+    )
+    precio_compra = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        error_messages={
+            "required": "Falta el precio de compra.",
+            "invalid": "El precio de compra no es válido.",
+            "max_digits": "El precio de compra no es válido.",
+            "max_decimal_places": "El precio de compra no es válido.",
+            "max_whole_digits": "El precio de compra no es válido.",
+        },
+    )
+
+    def validate_precio_compra(self, value):
+        if value < 0:
+            raise serializers.ValidationError("El precio de compra no puede ser negativo.")
+        return value
+
+
+class ProductosConPrecioField(serializers.Field):
+    """Lista de {producto_id, precio_compra} leída desde proveedor_productos."""
+
+    def to_representation(self, value):
+        precio = serializers.DecimalField(max_digits=12, decimal_places=2)
+        return [
+            {
+                "producto_id": vinculo.producto_id,
+                "precio_compra": (
+                    None
+                    if vinculo.precio_compra is None
+                    else precio.to_representation(vinculo.precio_compra)
+                ),
+            }
+            for vinculo in value.instance.vinculos.all()
+        ]
+
+    def to_internal_value(self, data):
+        if not isinstance(data, list) or any(not isinstance(item, dict) for item in data):
+            raise serializers.ValidationError("El formato de productos no es válido.")
+        if not data:
+            raise serializers.ValidationError(
+                "El proveedor debe tener al menos un producto asociado."
+            )
+        serializer = ProductoDelProveedorSerializer(data=data, many=True)
+        serializer.is_valid(raise_exception=True)
+        return serializer.validated_data
+
+
 class ProveedorSerializer(serializers.ModelSerializer):
+    productos = ProductosConPrecioField(
+        error_messages={"required": "Falta indicar el producto."}
+    )
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # La unicidad la resuelve validate_cuit comparando los 11 dígitos.
@@ -125,15 +189,6 @@ class ProveedorSerializer(serializers.ModelSerializer):
                     "max_length": "El CUIT no puede tener más de 13 caracteres.",
                 },
             },
-            "productos": {
-                "required": True,
-                "allow_empty": False,
-                "error_messages": {
-                    "required": "Falta indicar el producto.",
-                    "invalid": "El formato de productos no es válido.",
-                    "empty": "El proveedor debe tener al menos un producto asociado.",
-                },
-            },
             "email": {
                 "error_messages": {
                     "invalid": "El email no tiene un formato válido.",
@@ -170,6 +225,61 @@ class ProveedorSerializer(serializers.ModelSerializer):
         if existentes.exists():
             raise serializers.ValidationError("Ya existe un proveedor con ese CUIT.")
         return canonico
+
+    def validate_productos(self, productos):
+        vistos = []
+        repetidos = []
+        for item in productos:
+            producto_id = item["producto_id"]
+            if producto_id in vistos:
+                if producto_id not in repetidos:
+                    repetidos.append(producto_id)
+            else:
+                vistos.append(producto_id)
+        if repetidos:
+            if len(repetidos) == 1:
+                raise serializers.ValidationError(f"El producto {repetidos[0]} está repetido.")
+            lista = ", ".join(str(producto_id) for producto_id in repetidos)
+            raise serializers.ValidationError(f"Los productos {lista} están repetidos.")
+        existentes = set(Producto.objects.filter(pk__in=vistos).values_list("pk", flat=True))
+        faltantes = [producto_id for producto_id in vistos if producto_id not in existentes]
+        if not faltantes:
+            return productos
+        if len(faltantes) == 1:
+            raise serializers.ValidationError(f"El producto {faltantes[0]} no existe.")
+        lista = ", ".join(str(producto_id) for producto_id in faltantes)
+        raise serializers.ValidationError(f"Los productos {lista} no existen.")
+
+    def _reemplazar_productos(self, proveedor, productos):
+        proveedor.vinculos.all().delete()
+        ProveedorProducto.objects.bulk_create(
+            [
+                ProveedorProducto(
+                    proveedor=proveedor,
+                    producto_id=item["producto_id"],
+                    precio_compra=item["precio_compra"],
+                )
+                for item in productos
+            ]
+        )
+
+    def create(self, validated_data):
+        productos = validated_data.pop("productos")
+        with transaction.atomic():
+            proveedor = Proveedor.objects.create(**validated_data)
+            self._reemplazar_productos(proveedor, productos)
+        return proveedor
+
+    def update(self, instance, validated_data):
+        productos = validated_data.pop("productos", None)
+        with transaction.atomic():
+            proveedor = super().update(instance, validated_data)
+            if productos is not None:
+                self._reemplazar_productos(proveedor, productos)
+                cache = getattr(proveedor, "_prefetched_objects_cache", None)
+                if cache is not None:
+                    cache.pop("vinculos", None)
+        return proveedor
 
 
 class EstadoOrdenCompraSerializer(serializers.ModelSerializer):

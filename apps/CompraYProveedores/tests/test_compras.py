@@ -8,7 +8,7 @@ Cubre los siguientes escenarios:
 - Validación de datos: CUIT único, campos requeridos, formatos correctos
 
 Nota: el renglón guarda producto_id como entero. El proveedor se vincula
-a uno o más productos de SCM.
+a uno o más productos de SCM, con el precio de compra en cada vínculo.
 """
 
 import pytest
@@ -22,6 +22,7 @@ from apps.CompraYProveedores.models import (
     OrdenCompra,
     OrdenCompraDetalle,
     Proveedor,
+    ProveedorProducto,
 )
 from apps.SCM.models import Producto
 
@@ -51,6 +52,15 @@ def _producto(codigo):
     )
 
 
+def _catalogo(producto_id, precio="10.00"):
+    ids = producto_id if isinstance(producto_id, list) else [producto_id]
+    return [{"producto_id": pk, "precio_compra": precio} for pk in ids]
+
+
+def _por_producto(productos):
+    return sorted(productos, key=lambda item: item["producto_id"])
+
+
 @pytest.mark.django_db
 def test_proveedores_sin_token_da_401(api_client):
     response = api_client.get("/api/compras/proveedores/")
@@ -69,12 +79,12 @@ def test_crear_y_listar_proveedor(auth_client):
             "email": "test@corralon.test",
             "cuit": "30712345678",
             "direccion": "Calle 1",
-            "productos": [producto.pk],
+            "productos": _catalogo(producto.pk),
         },
         format="json",
     )
     assert alta.status_code == 201
-    assert producto.pk in alta.data["productos"]
+    assert alta.data["productos"] == _catalogo(producto.pk)
 
     listado = auth_client.get("/api/compras/proveedores/")
     assert listado.status_code == 200
@@ -90,7 +100,7 @@ def test_cuit_con_y_sin_guiones_es_el_mismo_proveedor(auth_client):
             "nombre": "Madera Norte",
             "apellido": "SA",
             "cuit": "20442152099",
-            "productos": [producto.pk],
+            "productos": _catalogo(producto.pk),
         },
         format="json",
     )
@@ -103,7 +113,7 @@ def test_cuit_con_y_sin_guiones_es_el_mismo_proveedor(auth_client):
             "nombre": "Madera Norte Bis",
             "apellido": "SRL",
             "cuit": "20-44215209-9",
-            "productos": [producto.pk],
+            "productos": _catalogo(producto.pk),
         },
         format="json",
     )
@@ -135,12 +145,20 @@ def test_un_proveedor_puede_tener_varios_productos_y_compartirlos(auth_client):
             "nombre": "Corralón Norte",
             "apellido": "SA",
             "cuit": "30111000111",
-            "productos": [tabla.pk, clavo.pk],
+            "productos": [
+                {"producto_id": tabla.pk, "precio_compra": "1500.00"},
+                {"producto_id": clavo.pk, "precio_compra": "25.50"},
+            ],
         },
         format="json",
     )
     assert primero.status_code == 201
-    assert set(primero.data["productos"]) == {tabla.pk, clavo.pk}
+    assert primero.data["productos"] == _por_producto(
+        [
+            {"producto_id": tabla.pk, "precio_compra": "1500.00"},
+            {"producto_id": clavo.pk, "precio_compra": "25.50"},
+        ]
+    )
 
     segundo = auth_client.post(
         "/api/compras/proveedores/",
@@ -148,12 +166,135 @@ def test_un_proveedor_puede_tener_varios_productos_y_compartirlos(auth_client):
             "nombre": "Corralón Sur",
             "apellido": "SA",
             "cuit": "30111000222",
-            "productos": [tabla.pk],
+            "productos": _catalogo(tabla.pk, "900.00"),
         },
         format="json",
     )
     assert segundo.status_code == 201
-    assert segundo.data["productos"] == [tabla.pk]
+    assert segundo.data["productos"] == _catalogo(tabla.pk, "900.00")
+
+
+@pytest.mark.django_db
+def test_el_precio_de_compra_sale_en_el_listado_y_en_el_detalle(auth_client):
+    tabla = _producto("PRE-TABLA")
+    clavo = _producto("PRE-CLAVO")
+    esperado = _por_producto(
+        [
+            {"producto_id": tabla.pk, "precio_compra": "1500.00"},
+            {"producto_id": clavo.pk, "precio_compra": "25.50"},
+        ]
+    )
+    alta = auth_client.post(
+        "/api/compras/proveedores/",
+        {
+            "nombre": "Corralón Precio",
+            "apellido": "SA",
+            "cuit": "30111000333",
+            "productos": esperado,
+        },
+        format="json",
+    )
+    assert alta.status_code == 201, alta.data
+    proveedor_id = alta.data["proveedor_id"]
+    assert alta.data["productos"] == esperado
+
+    detalle = auth_client.get(f"/api/compras/proveedores/{proveedor_id}/")
+    assert detalle.status_code == 200
+    assert detalle.data["productos"] == esperado
+
+    listado = auth_client.get("/api/compras/proveedores/")
+    assert listado.status_code == 200
+    guardado = next(
+        item for item in listado.data["results"] if item["proveedor_id"] == proveedor_id
+    )
+    assert guardado["productos"] == esperado
+
+    mismo_nombre = auth_client.patch(
+        f"/api/compras/proveedores/{proveedor_id}/",
+        {"nombre": "Corralón Precio Actualizado"},
+        format="json",
+    )
+    assert mismo_nombre.status_code == 200
+    assert mismo_nombre.data["productos"] == esperado
+
+    actualizado = _por_producto(
+        [
+            {"producto_id": tabla.pk, "precio_compra": "1600.00"},
+            {"producto_id": clavo.pk, "precio_compra": "25.50"},
+        ]
+    )
+    cambio = auth_client.patch(
+        f"/api/compras/proveedores/{proveedor_id}/",
+        {"productos": actualizado},
+        format="json",
+    )
+    assert cambio.status_code == 200, cambio.data
+    assert cambio.data["productos"] == actualizado
+    assert (
+        auth_client.get(f"/api/compras/proveedores/{proveedor_id}/").data["productos"]
+        == actualizado
+    )
+
+
+@pytest.mark.django_db
+def test_el_precio_de_compra_se_valida(auth_client):
+    producto = _producto("PRE-VAL")
+    base = {"nombre": "Valida Precio", "apellido": "SA", "cuit": "30111000444"}
+
+    sin_precio = auth_client.post(
+        "/api/compras/proveedores/",
+        {**base, "productos": [{"producto_id": producto.pk}]},
+        format="json",
+    )
+    assert sin_precio.status_code == 400
+    assert "Falta el precio de compra." in str(sin_precio.data)
+
+    formato_viejo = auth_client.post(
+        "/api/compras/proveedores/",
+        {**base, "productos": [producto.pk]},
+        format="json",
+    )
+    assert formato_viejo.status_code == 400
+    assert "El formato de productos no es válido." in str(formato_viejo.data)
+
+    negativo = auth_client.post(
+        "/api/compras/proveedores/",
+        {**base, "productos": _catalogo(producto.pk, "-1.00")},
+        format="json",
+    )
+    assert negativo.status_code == 400
+    assert "El precio de compra no puede ser negativo." in str(negativo.data)
+
+    inexistente = auth_client.post(
+        "/api/compras/proveedores/",
+        {**base, "productos": [{"producto_id": 999999, "precio_compra": "1.00"}]},
+        format="json",
+    )
+    assert inexistente.status_code == 400
+    assert "El producto 999999 no existe." in str(inexistente.data)
+
+    repetido = auth_client.post(
+        "/api/compras/proveedores/",
+        {
+            **base,
+            "productos": _catalogo(producto.pk, "10.00") + _catalogo(producto.pk, "12.00"),
+        },
+        format="json",
+    )
+    assert repetido.status_code == 400
+    assert f"El producto {producto.pk} está repetido." in str(repetido.data)
+    assert Proveedor.objects.filter(nombre="Valida Precio").count() == 0
+
+
+@pytest.mark.django_db
+def test_un_vinculo_sin_precio_se_lee_en_null(auth_client):
+    producto = _producto("PRE-NULL")
+    proveedor = Proveedor.objects.create(nombre="Viejo", apellido="SA", cuit="30999000111")
+    ProveedorProducto.objects.create(proveedor=proveedor, producto=producto, precio_compra=None)
+
+    detalle = auth_client.get(f"/api/compras/proveedores/{proveedor.pk}/")
+    assert detalle.status_code == 200
+    assert detalle.data["productos"] == [{"producto_id": producto.pk, "precio_compra": None}]
 
 
 def _id_estado(client, nombre):
@@ -174,7 +315,7 @@ def test_alta_de_orden_trae_renglones_y_queda_pendiente(auth_client):
             "nombre": "Proveedor OC",
             "apellido": "SA",
             "cuit": "27111222334",
-            "productos": [producto.pk],
+            "productos": _catalogo(producto.pk),
         },
         format="json",
     )
@@ -215,7 +356,7 @@ def test_alta_de_orden_no_acepta_otro_estado_que_pendiente(auth_client):
             "nombre": "Proveedor Estado",
             "apellido": "SA",
             "cuit": "30111222335",
-            "productos": [producto.pk],
+            "productos": _catalogo(producto.pk),
         },
         format="json",
     )
@@ -267,7 +408,7 @@ def test_orden_pendiente_no_pasa_directo_a_recibida(auth_client):
             "nombre": "Proveedor Salto",
             "apellido": "SA",
             "cuit": "23111222336",
-            "productos": [producto_id],
+            "productos": _catalogo(producto_id),
         },
         format="json",
     )
@@ -312,7 +453,7 @@ def test_orden_rechazada_no_vuelve_a_aprobada(auth_client):
             "nombre": "Proveedor Rechazo",
             "apellido": "SA",
             "cuit": "24111222337",
-            "productos": [producto.pk],
+            "productos": _catalogo(producto.pk),
         },
         format="json",
     )
@@ -358,7 +499,7 @@ def test_orden_aprobada_no_cambia_el_total(auth_client):
             "nombre": "Proveedor Total",
             "apellido": "SA",
             "cuit": "25111222338",
-            "productos": [producto.pk],
+            "productos": _catalogo(producto.pk),
         },
         format="json",
     )
@@ -404,7 +545,7 @@ def test_orden_aprobada_no_vuelve_a_pendiente(auth_client):
             "nombre": "Proveedor Vuelta",
             "apellido": "SA",
             "cuit": "26111222339",
-            "productos": [producto.pk],
+            "productos": _catalogo(producto.pk),
         },
         format="json",
     )
@@ -474,7 +615,7 @@ def test_flujo_orden_compra_con_detalle(auth_client):
             "email": "",
             "cuit": "20111222333",
             "direccion": "",
-            "productos": [producto.pk],
+            "productos": _catalogo(producto.pk),
         },
         format="json",
     )
@@ -624,7 +765,7 @@ def test_recorrido_completo_del_modulo(auth_client):
             "nombre": "Maderas del Norte",
             "apellido": "SA",
             "cuit": "20442152099",
-            "productos": [producto_id],
+            "productos": _catalogo(producto_id),
         },
         format="json",
     )
@@ -638,7 +779,7 @@ def test_recorrido_completo_del_modulo(auth_client):
             "nombre": "Maderas del Norte Bis",
             "apellido": "SRL",
             "cuit": "20-44215209-9",
-            "productos": [producto_id],
+            "productos": _catalogo(producto_id),
         },
         format="json",
     )
@@ -728,14 +869,13 @@ def test_recorrido_completo_del_modulo(auth_client):
 
 
 def _proveedor(client, cuit, producto_id):
-    productos = producto_id if isinstance(producto_id, list) else [producto_id]
     respuesta = client.post(
         "/api/compras/proveedores/",
         {
             "nombre": "Proveedor Renglones",
             "apellido": "SA",
             "cuit": cuit,
-            "productos": productos,
+            "productos": _catalogo(producto_id),
         },
         format="json",
     )
@@ -884,7 +1024,7 @@ def test_al_cambiar_el_proveedor_los_renglones_tienen_que_ser_de_su_catalogo(aut
             "nombre": "Otro proveedor",
             "apellido": "SA",
             "cuit": "27111000886",
-            "productos": [otro.pk],
+            "productos": _catalogo(otro.pk),
         },
         format="json",
     )

@@ -23,6 +23,39 @@ ESTADOS_ORDEN_COMPRA = [
 ]
 
 
+class ProveedorProducto(models.Model):
+    """Vínculo proveedor–producto. El precio de compra es de esta relación."""
+
+    proveedor = models.ForeignKey(
+        "Proveedor",
+        on_delete=models.CASCADE,
+        db_column="proveedor_id",
+        related_name="vinculos",
+    )
+    producto = models.ForeignKey(
+        "scm.Producto",
+        on_delete=models.CASCADE,
+        db_column="producto_id",
+        related_name="vinculos_proveedor",
+    )
+    precio_compra = models.DecimalField(max_digits=12, decimal_places=2, null=True)
+
+    class Meta:
+        db_table = "proveedor_productos"
+        ordering = ["producto_id"]
+        verbose_name = "Producto del proveedor"
+        verbose_name_plural = "Productos del proveedor"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["proveedor", "producto"],
+                name="proveedor_productos_proveedor_id_producto_id_022f31af_uniq",
+            )
+        ]
+
+    def __str__(self):
+        return f"Proveedor {self.proveedor_id} - producto {self.producto_id}"
+
+
 class Proveedor(models.Model):
     proveedor_id = models.AutoField(primary_key=True)
     nombre = models.CharField(max_length=150)
@@ -33,6 +66,8 @@ class Proveedor(models.Model):
     direccion = models.CharField(max_length=200, blank=True)
     productos = models.ManyToManyField(
         "scm.Producto",
+        through="ProveedorProducto",
+        through_fields=("proveedor", "producto"),
         related_name="proveedores",
         blank=True,
     )

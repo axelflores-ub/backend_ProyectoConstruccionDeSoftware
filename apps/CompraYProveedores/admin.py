@@ -8,7 +8,20 @@ local de datos a través de una interfaz web.
 
 from django.contrib import admin
 
-from .models import EstadoOrdenCompra, OrdenCompra, OrdenCompraDetalle, Proveedor
+from .models import (
+    EstadoOrdenCompra,
+    OrdenCompra,
+    OrdenCompraDetalle,
+    Proveedor,
+    ProveedorProducto,
+)
+
+
+class ProveedorProductoInline(admin.TabularInline):
+    """Precio de compra de cada producto que vende el proveedor."""
+
+    model = ProveedorProducto
+    extra = 0
 
 
 class OrdenCompraDetalleInline(admin.TabularInline):
@@ -37,7 +50,7 @@ class ProveedorAdmin(admin.ModelAdmin):
     """
     list_display = ("proveedor_id", "nombre", "apellido", "cuit", "telefono", "email")
     search_fields = ("nombre", "apellido", "cuit", "email", "telefono")
-    filter_horizontal = ("productos",)
+    inlines = [ProveedorProductoInline]
 
 
 @admin.register(EstadoOrdenCompra)

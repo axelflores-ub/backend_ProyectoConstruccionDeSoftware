@@ -5,6 +5,7 @@ from apps.CompraYProveedores.models import (
     OrdenCompra,
     OrdenCompraDetalle,
     Proveedor,
+    ProveedorProducto,
 )
 from apps.SCM.models import MovimientoInventario
 
@@ -14,7 +15,11 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture
 def orden_pendiente(producto):
     proveedor = Proveedor.objects.create(nombre="Prov", cuit="20111222333")
-    proveedor.productos.add(producto)
+    ProveedorProducto.objects.create(
+        proveedor=proveedor,
+        producto=producto,
+        precio_compra="12000.00",
+    )
     orden = OrdenCompra.objects.create(
         proveedor=proveedor,
         estado=EstadoOrdenCompra.objects.get(nombre="Pendiente"),
