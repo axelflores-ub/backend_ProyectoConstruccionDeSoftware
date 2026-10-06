@@ -84,15 +84,35 @@ class OrdenCompraViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         """Al pasar la orden a "Recibida" se suma lo recibido al stock de SCM.
 
-        Todo va en una transacción: si algún producto no existe en SCM, la orden
-        no cambia de estado. Una orden Recibida ya no puede cambiar de estado
-        (evita sumar el stock dos veces).
+        Todo va en una transacción con SELECT FOR UPDATE sobre la OrdenCompra
+        para serializar requests concurrentes. El estado anterior se relee desde
+        la DB después del bloqueo (estado_en_db), de modo que si dos requests
+        llegan simultáneamente sólo uno ejecuta la recepción y el segundo
+        detecta que la orden ya es "Recibida" antes de intentar volver a hacerlo.
+
+        Si algún producto no existe en SCM la orden no cambia de estado.
+        Una orden Recibida ya no puede cambiar de estado (evita doble stock).
         """
-        estado_anterior = serializer.instance.estado.nombre
         with transaction.atomic():
+            # Bloquea la fila para serializar requests concurrentes que
+            # intenten cambiar el estado de la misma orden al mismo tiempo.
+            orden_bloqueada = (
+                OrdenCompra.objects.select_related("estado")
+                .select_for_update()
+                .get(pk=serializer.instance.pk)
+            )
+            # Releemos el estado desde la DB (puede diferir del que leyó
+            # el serializer antes de entrar a la transacción).
+            estado_en_db = orden_bloqueada.estado.nombre
+
+            # Sincronizamos la instancia del serializer con la fila bloqueada
+            # para que serializer.save() trabaje sobre datos frescos.
+            serializer.instance = orden_bloqueada
+
             orden = serializer.save()
             estado_nuevo = orden.estado.nombre
-            if estado_anterior == ESTADO_RECIBIDA and estado_nuevo != ESTADO_RECIBIDA:
+
+            if estado_en_db == ESTADO_RECIBIDA and estado_nuevo != ESTADO_RECIBIDA:
                 raise ValidationError({"estado": "Una orden recibida no puede cambiar de estado."})
-            if estado_nuevo == ESTADO_RECIBIDA and estado_anterior != ESTADO_RECIBIDA:
+            if estado_nuevo == ESTADO_RECIBIDA and estado_en_db != ESTADO_RECIBIDA:
                 registrar_recepcion_orden_compra(orden, self.request.user)
