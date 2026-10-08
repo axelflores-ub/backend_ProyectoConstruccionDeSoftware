@@ -26,6 +26,7 @@ from apps.CompraYProveedores.models import (
     Proveedor,
     ProveedorProducto,
 )
+from apps.ContabilidadFinanzas.models import FacturaCabecera
 from apps.SCM.models import Producto
 
 
@@ -785,7 +786,9 @@ def _estado(client, oc_id):
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize("nombre_estado", ["Aprobada", "Recibida"])
+@pytest.mark.parametrize(
+    "nombre_estado", ["Aprobada", "Recibida", "Devuelto", "Contabilizado"]
+)
 def test_no_se_puede_eliminar_orden_aprobada_o_recibida(auth_client, nombre_estado):
     proveedor = Proveedor.objects.create(
         nombre="Proveedor Delete",
@@ -803,7 +806,9 @@ def test_no_se_puede_eliminar_orden_aprobada_o_recibida(auth_client, nombre_esta
     respuesta = auth_client.delete(f"/api/compras/ordenes-compra/{orden.pk}/")
 
     assert respuesta.status_code == 400
-    assert "No se puede eliminar una orden aprobada o recibida." in str(respuesta.data)
+    assert "No se puede eliminar una orden aprobada, recibida, devuelta o contabilizada." in str(
+        respuesta.data
+    )
     assert OrdenCompra.objects.filter(pk=orden.pk).exists()
 
 
@@ -840,6 +845,8 @@ def test_recorrido_completo_del_modulo(auth_client):
         "Aprobada",
         "Rechazada",
         "Recibida",
+        "Devuelto",
+        "Contabilizado",
     }
     assert (
         auth_client.post(
@@ -1174,3 +1181,181 @@ def test_se_puede_cargar_otro_producto_del_mismo_proveedor(auth_client):
     assert cambio.status_code == 200, cambio.data
     assert cambio.data["detalles"][0]["producto_id"] == segundo.pk
     assert cambio.data["total"] == "20.00"
+
+
+def _pasar(client, oc_id, nombre):
+    return client.patch(
+        f"/api/compras/ordenes-compra/{oc_id}/",
+        {"estado": _id_estado(client, nombre)},
+        format="json",
+    )
+
+
+def _stock(client, producto_id):
+    respuesta = client.get(f"/api/scm/productos/{producto_id}/")
+    assert respuesta.status_code == 200
+    return respuesta.data["stock_actual"]
+
+
+@pytest.mark.django_db
+def test_devuelto_rechaza_el_camion_y_ahi_termina(auth_client):
+    producto = _producto("DEV-001")
+    proveedor_id = _proveedor(auth_client, "27111000881", producto.pk)
+    oc_id = _orden(auth_client, proveedor_id, "40.00", producto.pk, 4, "10.00")
+
+    assert _pasar(auth_client, oc_id, "Aprobada").status_code == 200
+    assert _stock(auth_client, producto.pk) == 0
+
+    devuelto = _pasar(auth_client, oc_id, "Devuelto")
+    assert devuelto.status_code == 200, devuelto.data
+    assert devuelto.data["estado"] == _id_estado(auth_client, "Devuelto")
+    assert _stock(auth_client, producto.pk) == 0
+
+    assert _pasar(auth_client, oc_id, "Recibida").status_code == 400
+    assert _pasar(auth_client, oc_id, "Contabilizado").status_code == 400
+    respuesta = auth_client.post(
+        f"/api/compras/ordenes-compra/{oc_id}/enviar-a-finanzas/",
+        {"numero": "C-DEV-1"},
+        format="json",
+    )
+    assert respuesta.status_code == 400
+    assert "Solo se puede pasar a finanzas una orden recibida." in str(respuesta.data)
+    assert _estado(auth_client, oc_id)["estado"] == _id_estado(auth_client, "Devuelto")
+    assert _stock(auth_client, producto.pk) == 0
+    assert not FacturaCabecera.objects.filter(orden_compra_id=oc_id).exists()
+
+
+@pytest.mark.django_db
+def test_recibida_no_puede_pasar_a_devuelto(auth_client):
+    producto = _producto("REC-DEV")
+    proveedor_id = _proveedor(auth_client, "27111000882", producto.pk)
+    oc_id = _orden(auth_client, proveedor_id, "40.00", producto.pk, 4, "10.00")
+    assert _pasar(auth_client, oc_id, "Aprobada").status_code == 200
+    assert _pasar(auth_client, oc_id, "Recibida").status_code == 200
+    assert _stock(auth_client, producto.pk) == 4
+
+    rechazo = _pasar(auth_client, oc_id, "Devuelto")
+    assert rechazo.status_code == 400
+    assert _estado(auth_client, oc_id)["estado"] == _id_estado(auth_client, "Recibida")
+    assert _stock(auth_client, producto.pk) == 4
+
+    sin_factura = _pasar(auth_client, oc_id, "Contabilizado")
+    assert sin_factura.status_code == 400
+    assert "La orden todavía no tiene factura de compra." in str(sin_factura.data)
+
+
+@pytest.mark.django_db
+def test_aprobada_no_pasa_a_rechazada(auth_client):
+    producto = _producto("APR-REC")
+    proveedor_id = _proveedor(auth_client, "27111000883", producto.pk)
+    oc_id = _orden(auth_client, proveedor_id, "10.00", producto.pk, 1, "10.00")
+    assert _pasar(auth_client, oc_id, "Aprobada").status_code == 200
+
+    rechazo = _pasar(auth_client, oc_id, "Rechazada")
+    assert rechazo.status_code == 400
+    assert _estado(auth_client, oc_id)["estado"] == _id_estado(auth_client, "Aprobada")
+
+
+@pytest.mark.django_db
+def test_enviar_a_finanzas_desde_recibida_genera_la_factura(auth_client):
+    producto = _producto("FAC-001")
+    proveedor_id = _proveedor(auth_client, "27111000661", producto.pk)
+    oc_id = _orden(auth_client, proveedor_id, "40.00", producto.pk, 4, "10.00")
+    assert _pasar(auth_client, oc_id, "Aprobada").status_code == 200
+    assert _pasar(auth_client, oc_id, "Recibida").status_code == 200
+
+    respuesta = auth_client.post(
+        f"/api/compras/ordenes-compra/{oc_id}/enviar-a-finanzas/",
+        {
+            "numero": "C-0001",
+            "impuestos": "21.00",
+            "fecha": "2026-10-08T12:00:00-03:00",
+        },
+        format="json",
+    )
+    assert respuesta.status_code == 201, respuesta.data
+    assert respuesta.data["orden"]["estado"] == _id_estado(auth_client, "Contabilizado")
+    factura = respuesta.data["factura"]
+    assert factura["tipo"] == "COMPRA"
+    assert factura["orden_compra_id"] == oc_id
+    assert factura["numero"] == "C-0001"
+    assert factura["subtotal"] == "40.00"
+    assert factura["total"] == "61.00"
+    assert factura["detalles"] == [
+        {
+            "id": factura["detalles"][0]["id"],
+            "producto_id": producto.pk,
+            "cantidad": 4,
+            "precio_unitario": "10.00",
+            "subtotal": "40.00",
+        }
+    ]
+    assert _stock(auth_client, producto.pk) == 4
+
+    repetida = auth_client.post(
+        f"/api/compras/ordenes-compra/{oc_id}/enviar-a-finanzas/",
+        {"numero": "C-0002"},
+        format="json",
+    )
+    assert repetida.status_code == 400
+    assert "Esa orden ya tiene una factura de compra." in str(repetida.data)
+    assert FacturaCabecera.objects.filter(orden_compra_id=oc_id).count() == 1
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("nombre", ["Pendiente", "Aprobada", "Rechazada"])
+def test_no_se_pasa_a_finanzas_antes_de_recibir(auth_client, nombre):
+    producto = _producto(f"PRE-{nombre[:3]}")
+    proveedor_id = _proveedor(auth_client, "27111000770", producto.pk)
+    oc_id = _orden(auth_client, proveedor_id, "10.00", producto.pk, 1, "10.00")
+    if nombre != "Pendiente":
+        assert _pasar(auth_client, oc_id, nombre).status_code == 200
+
+    respuesta = auth_client.post(
+        f"/api/compras/ordenes-compra/{oc_id}/enviar-a-finanzas/",
+        {"numero": "C-NO"},
+        format="json",
+    )
+    assert respuesta.status_code == 400
+    assert "Solo se puede pasar a finanzas una orden recibida." in str(respuesta.data)
+    assert _estado(auth_client, oc_id)["estado"] == _id_estado(auth_client, nombre)
+    assert not FacturaCabecera.objects.filter(orden_compra_id=oc_id).exists()
+
+
+@pytest.mark.django_db
+def test_enviar_a_finanzas_sin_numero_no_cambia_la_orden(auth_client):
+    producto = _producto("NUM-001")
+    proveedor_id = _proveedor(auth_client, "27111000441", producto.pk)
+    oc_id = _orden(auth_client, proveedor_id, "10.00", producto.pk, 1, "10.00")
+    assert _pasar(auth_client, oc_id, "Aprobada").status_code == 200
+    assert _pasar(auth_client, oc_id, "Recibida").status_code == 200
+
+    respuesta = auth_client.post(
+        f"/api/compras/ordenes-compra/{oc_id}/enviar-a-finanzas/",
+        {},
+        format="json",
+    )
+    assert respuesta.status_code == 400
+    assert "Falta el número de factura." in str(respuesta.data)
+    assert _estado(auth_client, oc_id)["estado"] == _id_estado(auth_client, "Recibida")
+    assert not FacturaCabecera.objects.exists()
+
+
+@pytest.mark.django_db
+def test_patch_a_contabilizado_si_la_factura_ya_existe(auth_client):
+    producto = _producto("PAT-001")
+    proveedor_id = _proveedor(auth_client, "27111000331", producto.pk)
+    oc_id = _orden(auth_client, proveedor_id, "10.00", producto.pk, 1, "10.00")
+    assert _pasar(auth_client, oc_id, "Aprobada").status_code == 200
+    assert _pasar(auth_client, oc_id, "Recibida").status_code == 200
+    FacturaCabecera.objects.create(
+        tipo=FacturaCabecera.Tipo.COMPRA,
+        orden_compra_id=oc_id,
+        numero="C-ORM",
+        fecha="2026-10-08T12:00:00Z",
+    )
+
+    respuesta = _pasar(auth_client, oc_id, "Contabilizado")
+    assert respuesta.status_code == 200, respuesta.data
+    assert respuesta.data["estado"] == _id_estado(auth_client, "Contabilizado")
+    assert _stock(auth_client, producto.pk) == 1

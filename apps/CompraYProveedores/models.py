@@ -10,17 +10,31 @@ Define las estructuras de datos (tablas de base de datos) para gestionar:
 
 from django.db import models
 
-# Estados del catálogo estado_orden_compra (los carga la migración 0003).
+# Estados del catálogo estado_orden_compra.
+# 0003 carga los cuatro primeros. 0008 agrega Devuelto y Contabilizado.
 ESTADO_PENDIENTE = "Pendiente"
 ESTADO_APROBADA = "Aprobada"
 ESTADO_RECHAZADA = "Rechazada"
 ESTADO_RECIBIDA = "Recibida"
+ESTADO_DEVUELTO = "Devuelto"
+ESTADO_CONTABILIZADO = "Contabilizado"
 ESTADOS_ORDEN_COMPRA = [
     ESTADO_PENDIENTE,
     ESTADO_APROBADA,
     ESTADO_RECHAZADA,
     ESTADO_RECIBIDA,
+    ESTADO_DEVUELTO,
+    ESTADO_CONTABILIZADO,
 ]
+# Solo la carga aceptada se factura. Devuelto es el camión rechazado y termina ahí.
+ESTADOS_FACTURABLES = {ESTADO_RECIBIDA}
+# Pendiente y Rechazada sí se pueden borrar. El resto ya movió mercadería o plata.
+ESTADOS_NO_ELIMINABLES = {
+    ESTADO_APROBADA,
+    ESTADO_RECIBIDA,
+    ESTADO_DEVUELTO,
+    ESTADO_CONTABILIZADO,
+}
 
 # proveedor_productos.activo: 1 vigente, 0 dado de baja. La fila no se borra.
 VINCULO_ACTIVO = 1

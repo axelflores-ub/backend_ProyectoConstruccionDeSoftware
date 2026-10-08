@@ -32,8 +32,8 @@ class OrdenCompraDetalleInline(admin.TabularInline):
 
     Cuando la orden está en estado Pendiente, los renglones son editables y se
     pueden agregar o eliminar. En cualquier otro estado (Aprobada, Rechazada,
-    Recibida) el inline pasa a modo lectura: no se permite agregar, eliminar
-    ni modificar ningún campo.
+    Recibida, Devuelto, Contabilizado) el inline pasa a modo lectura: no se
+    permite agregar, eliminar ni modificar ningún campo.
     """
 
     model = OrdenCompraDetalle
@@ -80,8 +80,8 @@ class ProveedorAdmin(admin.ModelAdmin):
 class EstadoOrdenCompraAdmin(admin.ModelAdmin):
     """Catálogo de estados de orden de compra. Solo lectura: lo mantienen las migraciones.
 
-    Los estados (Pendiente, Aprobada, Rechazada, Recibida) se cargan mediante
-    la migración 0003 y no deben modificarse manualmente desde el admin.
+    Los estados se cargan mediante las migraciones 0003 y 0008 (Devuelto y
+    Contabilizado) y no deben modificarse manualmente desde el admin.
 
     Atributos:
         list_display: Campos mostrados en la lista de estados.

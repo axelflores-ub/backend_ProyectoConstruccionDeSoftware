@@ -19,6 +19,8 @@ from apps.SCM.models import Producto
 from .cuit import cuit_canonico
 from .models import (
     ESTADO_APROBADA,
+    ESTADO_CONTABILIZADO,
+    ESTADO_DEVUELTO,
     ESTADO_PENDIENTE,
     ESTADO_RECHAZADA,
     ESTADO_RECIBIDA,
@@ -30,12 +32,15 @@ from .models import (
     Proveedor,
     ProveedorProducto,
 )
+from .services import tiene_factura_compra
 
 TRANSICIONES_ORDEN = {
     ESTADO_PENDIENTE: {ESTADO_APROBADA, ESTADO_RECHAZADA},
-    ESTADO_APROBADA: {ESTADO_RECIBIDA, ESTADO_RECHAZADA},
+    ESTADO_APROBADA: {ESTADO_RECIBIDA, ESTADO_DEVUELTO},
     ESTADO_RECHAZADA: set(),
-    ESTADO_RECIBIDA: set(),
+    ESTADO_RECIBIDA: {ESTADO_CONTABILIZADO},
+    ESTADO_DEVUELTO: set(),
+    ESTADO_CONTABILIZADO: set(),
 }
 
 
@@ -354,6 +359,14 @@ class OrdenCompraSerializer(serializers.ModelSerializer):
             if nuevo != actual and nuevo not in TRANSICIONES_ORDEN.get(actual, set()):
                 raise serializers.ValidationError(
                     {"estado": "Ese cambio de estado no está permitido."}
+                )
+            if (
+                nuevo == ESTADO_CONTABILIZADO
+                and actual != ESTADO_CONTABILIZADO
+                and not tiene_factura_compra(self.instance.pk)
+            ):
+                raise serializers.ValidationError(
+                    {"estado": "La orden todavía no tiene factura de compra."}
                 )
         if self.instance is not None and self.instance.estado.nombre != ESTADO_PENDIENTE:
             bloqueados = {

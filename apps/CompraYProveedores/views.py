@@ -7,23 +7,30 @@ Todos los endpoints requieren autenticación JWT (IsAuthenticated).
 """
 
 from django.db import transaction
-from rest_framework import viewsets
+from django.utils import timezone
+from rest_framework import status, viewsets
+from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
+from rest_framework.response import Response
 
 from apps.SCM.services import registrar_recepcion_orden_compra
 
 from .models import (
-    ESTADO_APROBADA,
+    ESTADO_CONTABILIZADO,
     ESTADO_RECIBIDA,
+    ESTADOS_FACTURABLES,
+    ESTADOS_NO_ELIMINABLES,
     EstadoOrdenCompra,
     OrdenCompra,
     Proveedor,
 )
 from .serializers import (
+    TRANSICIONES_ORDEN,
     EstadoOrdenCompraSerializer,
     OrdenCompraSerializer,
     ProveedorSerializer,
 )
+from .services import marcar_orden_contabilizada, tiene_factura_compra
 
 
 class ProveedorViewSet(viewsets.ModelViewSet):
@@ -46,7 +53,7 @@ class ProveedorViewSet(viewsets.ModelViewSet):
 
 
 class EstadoOrdenCompraViewSet(viewsets.ReadOnlyModelViewSet):
-    """Catálogo fijo de estados. Solo lectura: Pendiente, Aprobada, Rechazada, Recibida."""
+    """Catálogo fijo. Solo lectura: Pendiente, Aprobada, Rechazada, Recibida, Devuelto, Contabilizado."""
 
     queryset = EstadoOrdenCompra.objects.all()
     serializer_class = EstadoOrdenCompraSerializer
@@ -74,45 +81,104 @@ class OrdenCompraViewSet(viewsets.ModelViewSet):
     ordering_fields = ["id", "fecha", "total"]
 
     def perform_destroy(self, instance):
-        """No permite eliminar órdenes aprobadas o recibidas."""
-        if instance.estado.nombre in {ESTADO_APROBADA, ESTADO_RECIBIDA}:
+        """No permite eliminar una orden que ya salió de Pendiente o Rechazada."""
+        if instance.estado.nombre in ESTADOS_NO_ELIMINABLES:
             raise ValidationError(
-                {"detail": "No se puede eliminar una orden aprobada o recibida."}
+                {
+                    "detail": (
+                        "No se puede eliminar una orden aprobada, recibida, "
+                        "devuelta o contabilizada."
+                    )
+                }
             )
         instance.delete()
 
     def perform_update(self, serializer):
-        """Al pasar la orden a "Recibida" se suma lo recibido al stock de SCM.
+        """Aplica el cambio de estado y el efecto de stock que le corresponde.
 
-        Todo va en una transacción con SELECT FOR UPDATE sobre la OrdenCompra
-        para serializar requests concurrentes. El estado anterior se relee desde
-        la DB después del bloqueo (estado_en_db), de modo que si dos requests
-        llegan simultáneamente sólo uno ejecuta la recepción y el segundo
-        detecta que la orden ya es "Recibida" antes de intentar volver a hacerlo.
+        Todo va en una transacción con SELECT FOR UPDATE sobre la OrdenCompra.
+        El estado se relee después del bloqueo: si dos requests llegan juntos,
+        el segundo ve el estado que dejó el primero y no vuelve a sumar o
+        restar stock.
 
-        Si algún producto no existe en SCM la orden no cambia de estado.
-        Una orden Recibida ya no puede cambiar de estado (evita doble stock).
+        Recibida suma una ENTRADA: el camión se aceptó. Devuelto no toca el
+        stock: el camión se rechazó y no hubo carga. Contabilizado no toca
+        el stock y solo se permite desde Recibida si ya hay factura.
         """
         with transaction.atomic():
-            # Bloquea la fila para serializar requests concurrentes que
-            # intenten cambiar el estado de la misma orden al mismo tiempo.
-            orden_bloqueada = (
-                OrdenCompra.objects.select_related("estado")
-                .select_for_update()
-                .get(pk=serializer.instance.pk)
+            orden_bloqueada = OrdenCompra.objects.select_for_update(of=("self",)).get(
+                pk=serializer.instance.pk
             )
-            # Releemos el estado desde la DB (puede diferir del que leyó
-            # el serializer antes de entrar a la transacción).
-            estado_en_db = orden_bloqueada.estado.nombre
-
-            # Sincronizamos la instancia del serializer con la fila bloqueada
-            # para que serializer.save() trabaje sobre datos frescos.
             serializer.instance = orden_bloqueada
+            estado_en_db = orden_bloqueada.estado.nombre
+            estado_pedido = serializer.validated_data.get("estado", orden_bloqueada.estado)
+            estado_nuevo = estado_pedido.nombre
+
+            if estado_nuevo != estado_en_db and estado_nuevo not in TRANSICIONES_ORDEN.get(
+                estado_en_db, set()
+            ):
+                raise ValidationError({"estado": "Ese cambio de estado no está permitido."})
+            if (
+                estado_nuevo == ESTADO_CONTABILIZADO
+                and estado_en_db != ESTADO_CONTABILIZADO
+                and not tiene_factura_compra(orden_bloqueada.pk)
+            ):
+                raise ValidationError({"estado": "La orden todavía no tiene factura de compra."})
 
             orden = serializer.save()
-            estado_nuevo = orden.estado.nombre
 
-            if estado_en_db == ESTADO_RECIBIDA and estado_nuevo != ESTADO_RECIBIDA:
-                raise ValidationError({"estado": "Una orden recibida no puede cambiar de estado."})
             if estado_nuevo == ESTADO_RECIBIDA and estado_en_db != ESTADO_RECIBIDA:
                 registrar_recepcion_orden_compra(orden, self.request.user)
+
+    @action(detail=True, methods=["post"], url_path="enviar-a-finanzas")
+    def enviar_a_finanzas(self, request, pk=None):
+        """Arma la factura de compra con los renglones de la orden y la contabiliza.
+
+        Solo una orden Recibida. Devuelto es el camión rechazado y termina ahí.
+        Al emitir la factura la orden pasa a Contabilizado.
+        """
+        from apps.ContabilidadFinanzas.serializers import FacturaCabeceraSerializer
+
+        self.get_object()
+        numero = str(request.data.get("numero", "")).strip()
+        if not numero:
+            raise ValidationError({"numero": "Falta el número de factura."})
+
+        with transaction.atomic():
+            orden = OrdenCompra.objects.select_for_update(of=("self",)).get(pk=pk)
+            if tiene_factura_compra(orden.pk):
+                raise ValidationError(
+                    {"estado": "Esa orden ya tiene una factura de compra."}
+                )
+            if orden.estado.nombre not in ESTADOS_FACTURABLES:
+                raise ValidationError(
+                    {"estado": "Solo se puede pasar a finanzas una orden recibida."}
+                )
+            payload = {
+                "tipo": "COMPRA",
+                "orden_compra_id": orden.pk,
+                "numero": numero,
+                "fecha": request.data.get("fecha") or timezone.now(),
+                "impuestos": request.data.get("impuestos", "0.00"),
+                "detalles": [
+                    {
+                        "producto_id": detalle.producto_id,
+                        "cantidad": detalle.cantidad,
+                        "precio_unitario": str(detalle.precio_unitario),
+                    }
+                    for detalle in orden.detalles.all()
+                ],
+            }
+            factura_serializer = FacturaCabeceraSerializer(data=payload)
+            factura_serializer.is_valid(raise_exception=True)
+            factura = factura_serializer.save()
+            marcar_orden_contabilizada(orden)
+            orden.refresh_from_db()
+
+        return Response(
+            {
+                "orden": OrdenCompraSerializer(orden).data,
+                "factura": FacturaCabeceraSerializer(factura).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
