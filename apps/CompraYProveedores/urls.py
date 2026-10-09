@@ -39,6 +39,7 @@ router.register(
 # GET    /api/compras/ordenes-compra/{id}/      - detalle de orden (con detalles anidados)
 # PUT    /api/compras/ordenes-compra/{id}/      - actualizar orden
 # DELETE /api/compras/ordenes-compra/{id}/      - eliminar orden
+# POST   /api/compras/ordenes-compra/{id}/enviar-a-finanzas/ - factura de compra
 router.register("ordenes-compra", OrdenCompraViewSet, basename="orden-compra")
 
 urlpatterns = router.urls

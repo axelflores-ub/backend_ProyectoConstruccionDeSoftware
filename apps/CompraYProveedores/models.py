@@ -10,17 +10,76 @@ Define las estructuras de datos (tablas de base de datos) para gestionar:
 
 from django.db import models
 
-# Estados del catálogo estado_orden_compra (los carga la migración 0003).
+# Estados del catálogo estado_orden_compra.
+# 0003 carga los cuatro primeros. 0008 agrega Devuelto y Contabilizado.
 ESTADO_PENDIENTE = "Pendiente"
 ESTADO_APROBADA = "Aprobada"
 ESTADO_RECHAZADA = "Rechazada"
 ESTADO_RECIBIDA = "Recibida"
+ESTADO_DEVUELTO = "Devuelto"
+ESTADO_CONTABILIZADO = "Contabilizado"
 ESTADOS_ORDEN_COMPRA = [
     ESTADO_PENDIENTE,
     ESTADO_APROBADA,
     ESTADO_RECHAZADA,
     ESTADO_RECIBIDA,
+    ESTADO_DEVUELTO,
+    ESTADO_CONTABILIZADO,
 ]
+# Solo la carga aceptada se factura. Devuelto es el camión rechazado y termina ahí.
+ESTADOS_FACTURABLES = {ESTADO_RECIBIDA}
+# Pendiente y Rechazada sí se pueden borrar. El resto ya movió mercadería o plata.
+ESTADOS_NO_ELIMINABLES = {
+    ESTADO_APROBADA,
+    ESTADO_RECIBIDA,
+    ESTADO_DEVUELTO,
+    ESTADO_CONTABILIZADO,
+}
+
+# proveedor_productos.activo: 1 vigente, 0 dado de baja. La fila no se borra.
+VINCULO_ACTIVO = 1
+VINCULO_INACTIVO = 0
+
+
+class ProveedorProducto(models.Model):
+    """Vínculo proveedor–producto. El precio de compra es de esta relación."""
+
+    proveedor = models.ForeignKey(
+        "Proveedor",
+        on_delete=models.CASCADE,
+        db_column="proveedor_id",
+        related_name="vinculos",
+    )
+    producto = models.ForeignKey(
+        "scm.Producto",
+        on_delete=models.CASCADE,
+        db_column="producto_id",
+        related_name="vinculos_proveedor",
+    )
+    precio_compra = models.DecimalField(max_digits=12, decimal_places=2, null=True)
+    activo = models.PositiveSmallIntegerField(
+        default=VINCULO_ACTIVO,
+        choices=[(VINCULO_ACTIVO, "Activo"), (VINCULO_INACTIVO, "De baja")],
+    )
+
+    class Meta:
+        db_table = "proveedor_productos"
+        ordering = ["producto_id"]
+        verbose_name = "Producto del proveedor"
+        verbose_name_plural = "Productos del proveedor"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["proveedor", "producto"],
+                name="proveedor_productos_proveedor_id_producto_id_022f31af_uniq",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(activo__in=[VINCULO_ACTIVO, VINCULO_INACTIVO]),
+                name="proveedor_productos_activo_es_0_o_1",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Proveedor {self.proveedor_id} - producto {self.producto_id}"
 
 
 class Proveedor(models.Model):
@@ -33,6 +92,8 @@ class Proveedor(models.Model):
     direccion = models.CharField(max_length=200, blank=True)
     productos = models.ManyToManyField(
         "scm.Producto",
+        through="ProveedorProducto",
+        through_fields=("proveedor", "producto"),
         related_name="proveedores",
         blank=True,
     )
