@@ -9,6 +9,15 @@ class RubroSerializer(serializers.ModelSerializer):
         model = Rubro
         fields = ["id", "nombre", "descripcion"]
 
+    def validate_nombre(self, value):
+        value = value.strip()
+        qs = Rubro.objects.filter(nombre__iexact=value)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("Ya existe un rubro con ese nombre.")
+        return value
+
 
 class ProductoSerializer(serializers.ModelSerializer):
     rubro_nombre = serializers.CharField(source="rubro.nombre", read_only=True)
@@ -30,6 +39,15 @@ class ProductoSerializer(serializers.ModelSerializer):
         ]
         # El stock solo cambia a través de movimientos de inventario.
         read_only_fields = ["stock_actual"]
+
+    def validate_codigo(self, value):
+        value = value.strip()
+        qs = Producto.objects.filter(codigo=value)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("Ya existe un producto con ese código.")
+        return value
 
     def validate_precio(self, value):
         if value <= 0:

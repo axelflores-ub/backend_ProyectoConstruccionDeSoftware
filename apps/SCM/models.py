@@ -9,7 +9,7 @@ from django.db import models
 
 
 class Rubro(models.Model):
-    nombre = models.CharField(max_length=100)
+    nombre = models.CharField(max_length=100, unique=True)
     descripcion = models.CharField(max_length=200, blank=True)
 
     class Meta:
