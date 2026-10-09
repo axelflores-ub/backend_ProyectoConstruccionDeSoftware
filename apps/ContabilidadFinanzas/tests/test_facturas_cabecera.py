@@ -355,6 +355,77 @@ def test_crear_factura_con_diario_de_cierre_cerrado_falla(api_client, diario):
     assert not FacturaCabecera.objects.exists()
 
 
+def crear_diario_de(anio, mes, fecha):
+    periodo = Periodo.objects.get_or_create(anio=anio, mes=mes)[0]
+    return Diario.objects.create(cierre_mensual=periodo.cierres_mensuales.get(), fecha=fecha)
+
+
+@pytest.mark.django_db
+def test_crear_factura_de_periodo_cerrado_con_diario_de_otro_periodo_abierto_falla(api_client):
+    # Escenario de la revisión: enero cerrado, febrero abierto.
+    Periodo.objects.create(anio=2026, mes=1).cierres_mensuales.update(
+        estado=CierreMensual.Estado.CERRADO
+    )
+    diario_febrero = crear_diario_de(2026, 2, "2026-02-10T10:00:00Z")
+
+    response = api_client.post(
+        "/api/contabilidad/facturas/",
+        payload_venta(fecha="2026-01-10T10:00:00Z", diario=diario_febrero.id),
+    )
+
+    assert response.status_code == 400
+    assert "diario" in response.data
+    assert not FacturaCabecera.objects.exists()
+
+
+@pytest.mark.django_db
+def test_crear_factura_con_diario_de_otro_periodo_falla_aunque_ambos_esten_abiertos(api_client):
+    Periodo.objects.create(anio=2026, mes=1)
+    diario_febrero = crear_diario_de(2026, 2, "2026-02-10T10:00:00Z")
+
+    response = api_client.post(
+        "/api/contabilidad/facturas/",
+        payload_venta(fecha="2026-01-10T10:00:00Z", diario=diario_febrero.id),
+    )
+
+    assert response.status_code == 400
+    mensaje = str(response.data["diario"])
+    assert "02/2026" in mensaje and "01/2026" in mensaje
+    assert not FacturaCabecera.objects.exists()
+
+
+@pytest.mark.django_db
+def test_crear_factura_con_diario_del_mismo_periodo_se_acepta(api_client):
+    diario_enero = crear_diario_de(2026, 1, "2026-01-05T10:00:00Z")
+
+    response = api_client.post(
+        "/api/contabilidad/facturas/",
+        payload_venta(fecha="2026-01-20T10:00:00Z", diario=diario_enero.id),
+    )
+
+    assert response.status_code == 201
+    assert FacturaCabecera.objects.get().diario_id == diario_enero.id
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("mes_del_diario", "esperado"),
+    [(1, 201), (2, 400)],
+)
+def test_el_periodo_del_diario_se_compara_con_la_fecha_en_hora_local(
+    api_client, mes_del_diario, esperado
+):
+    # 01:00 UTC del 1 de febrero son las 22:00 del 31 de enero en Argentina: la factura es de enero.
+    diario = crear_diario_de(2026, mes_del_diario, "2026-01-15T10:00:00Z")
+
+    response = api_client.post(
+        "/api/contabilidad/facturas/",
+        payload_venta(fecha="2026-02-01T01:00:00Z", diario=diario.id),
+    )
+
+    assert response.status_code == esperado
+
+
 @pytest.mark.django_db
 def test_crear_factura_con_diario_de_cierre_abierto_sigue_funcionando(api_client, diario):
     response = api_client.post("/api/contabilidad/facturas/", payload_venta(diario=diario.id))

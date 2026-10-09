@@ -16,6 +16,12 @@ class PeriodoCerradoError(Exception):
     """El período ya está cerrado y no admite cambios."""
 
 
+def anio_y_mes(fecha):
+    """(año, mes) de una fecha, en hora local."""
+    fecha_local = timezone.localtime(fecha)
+    return fecha_local.year, fecha_local.month
+
+
 def asegurar_cierre_abierto(cierre):
     """Lanza PeriodoCerradoError si el cierre mensual ya está cerrado."""
     if cierre.estado == CierreMensual.Estado.CERRADO:
@@ -33,11 +39,9 @@ def cierre_de_factura(factura):
     if factura.diario_id:
         return factura.diario.cierre_mensual
 
-    fecha_local = timezone.localtime(factura.fecha)
+    anio, mes = anio_y_mes(factura.fecha)
     return (
-        CierreMensual.objects.filter(
-            periodo__anio=fecha_local.year, periodo__mes=fecha_local.month
-        )
+        CierreMensual.objects.filter(periodo__anio=anio, periodo__mes=mes)
         .order_by("id")
         .first()
     )
@@ -62,9 +66,9 @@ def registrar_diario_de_factura(datos):
     existe se crea, junto con su cierre abierto. Debe llamarse dentro de una transacción.
     """
     fecha = datos["fecha"]
-    fecha_local = timezone.localtime(fecha)
+    anio, mes = anio_y_mes(fecha)
 
-    periodo, _ = Periodo.objects.get_or_create(anio=fecha_local.year, mes=fecha_local.month)
+    periodo, _ = Periodo.objects.get_or_create(anio=anio, mes=mes)
     cierre = periodo.cierres_mensuales.order_by("id").first()
     if cierre is None:
         cierre = CierreMensual.objects.create(periodo=periodo)

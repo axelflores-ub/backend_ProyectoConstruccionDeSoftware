@@ -196,6 +196,22 @@ class FacturaCabeceraSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"orden_venta_id": "Una factura de compra no puede tener orden de venta."}
             )
+        diario = attrs.get("diario")
+        fecha = attrs.get("fecha")
+        if diario is not None and fecha is not None:
+            # La entrada de diario tiene que ser del mismo mes que la fecha de la factura:
+            # si no, se podría facturar en un mes cerrado usando una entrada de un mes abierto.
+            periodo = diario.cierre_mensual.periodo
+            anio, mes = services.anio_y_mes(fecha)
+            if (periodo.anio, periodo.mes) != (anio, mes):
+                raise serializers.ValidationError(
+                    {
+                        "diario": (
+                            f"La entrada de diario es del período {periodo}, pero la fecha "
+                            f"de la factura corresponde a {mes:02d}/{anio}."
+                        )
+                    }
+                )
         detalles = attrs.get("detalles")
         if detalles is not None and len(detalles) == 0:
             raise serializers.ValidationError(
