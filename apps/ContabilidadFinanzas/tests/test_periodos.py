@@ -3,7 +3,7 @@ from django.contrib.auth import get_user_model
 from faker import Faker
 from rest_framework.test import APIClient
 
-from apps.ContabilidadFinanzas.models import Periodo
+from apps.ContabilidadFinanzas.models import CierreMensual, Periodo
 
 fake = Faker()
 
@@ -163,3 +163,61 @@ def test_actualizar_periodo_inexistente_da_404(api_client):
     )
 
     assert response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_actualizar_periodo_con_cierre_cerrado_falla(api_client):
+    periodo = Periodo.objects.create(anio=2026, mes=12)
+    periodo.cierres_mensuales.update(estado=CierreMensual.Estado.CERRADO)
+
+    response = api_client.put(
+        f"/api/contabilidad/periodos/{periodo.id}/", {"anio": 2027, "mes": 1}
+    )
+
+    assert response.status_code == 400
+    assert "ya está cerrado" in str(response.data)
+    periodo.refresh_from_db()
+    assert (periodo.anio, periodo.mes) == (2026, 12)
+
+
+@pytest.mark.django_db
+def test_actualizar_periodo_con_cierre_abierto_sigue_funcionando(api_client):
+    periodo = Periodo.objects.create(anio=2026, mes=12)
+
+    response = api_client.put(
+        f"/api/contabilidad/periodos/{periodo.id}/", {"anio": 2027, "mes": 1}
+    )
+
+    assert response.status_code == 200
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("anio", [0, 1999, 2101, 99999])
+def test_crear_periodo_con_anio_fuera_de_rango_falla(api_client, anio):
+    response = api_client.post("/api/contabilidad/periodos/", {"anio": anio, "mes": 1})
+
+    assert response.status_code == 400
+    assert "anio" in response.data
+    assert not Periodo.objects.exists()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("anio", [2000, 2100])
+def test_crear_periodo_con_anio_limite_se_acepta(api_client, anio):
+    response = api_client.post("/api/contabilidad/periodos/", {"anio": anio, "mes": 1})
+
+    assert response.status_code == 201
+
+
+@pytest.mark.django_db
+def test_actualizar_periodo_con_anio_fuera_de_rango_falla(api_client):
+    periodo = Periodo.objects.create(anio=2026, mes=11)
+
+    response = api_client.put(
+        f"/api/contabilidad/periodos/{periodo.id}/", {"anio": 1999, "mes": 11}
+    )
+
+    assert response.status_code == 400
+    assert "anio" in response.data
+    periodo.refresh_from_db()
+    assert periodo.anio == 2026

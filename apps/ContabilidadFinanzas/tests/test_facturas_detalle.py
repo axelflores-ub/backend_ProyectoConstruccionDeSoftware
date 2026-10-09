@@ -1,9 +1,17 @@
+from decimal import Decimal
+
 import pytest
 from django.contrib.auth import get_user_model
 from faker import Faker
 from rest_framework.test import APIClient
 
-from apps.ContabilidadFinanzas.models import FacturaCabecera, FacturaDetalle
+from apps.ContabilidadFinanzas.models import (
+    CierreMensual,
+    Diario,
+    FacturaCabecera,
+    FacturaDetalle,
+    Periodo,
+)
 
 fake = Faker()
 
@@ -218,3 +226,72 @@ def test_modificar_o_borrar_detalle_no_permitido(api_client, factura, metodo):
     response = getattr(api_client, metodo)(f"/api/contabilidad/facturas-detalle/{detalle.id}/")
 
     assert response.status_code == 405
+
+
+@pytest.mark.django_db
+def test_agregar_detalle_a_factura_con_diario_de_periodo_cerrado_falla(api_client, factura):
+    periodo = Periodo.objects.create(anio=2026, mes=1)
+    cierre = periodo.cierres_mensuales.get()
+    factura.diario = Diario.objects.create(cierre_mensual=cierre, fecha=factura.fecha)
+    factura.save()
+    periodo.cierres_mensuales.update(estado=CierreMensual.Estado.CERRADO)
+
+    response = api_client.post("/api/contabilidad/facturas-detalle/", payload_detalle(factura))
+
+    assert response.status_code == 400
+    assert "factura" in response.data
+    assert not FacturaDetalle.objects.exists()
+
+
+@pytest.mark.django_db
+def test_agregar_detalle_a_factura_sin_diario_respeta_el_cierre_de_su_periodo(
+    api_client, factura
+):
+    # La factura es del 10/01/2026 y no tiene diario: se usa el cierre de su período.
+    periodo = Periodo.objects.create(anio=2026, mes=1)
+    periodo.cierres_mensuales.update(estado=CierreMensual.Estado.CERRADO)
+
+    response = api_client.post("/api/contabilidad/facturas-detalle/", payload_detalle(factura))
+
+    assert response.status_code == 400
+    assert "factura" in response.data
+    assert not FacturaDetalle.objects.exists()
+
+
+@pytest.mark.django_db
+def test_agregar_detalle_a_factura_de_periodo_abierto_sigue_funcionando(api_client, factura):
+    Periodo.objects.create(anio=2026, mes=1)
+
+    response = api_client.post("/api/contabilidad/facturas-detalle/", payload_detalle(factura))
+
+    assert response.status_code == 201
+    assert FacturaDetalle.objects.count() == 1
+
+
+@pytest.mark.django_db
+def test_crear_detalle_con_precio_negativo_falla(api_client, factura):
+    response = api_client.post(
+        "/api/contabilidad/facturas-detalle/", payload_detalle(factura, precio_unitario="-1.00")
+    )
+
+    assert response.status_code == 400
+    assert "precio_unitario" in response.data
+    assert not FacturaDetalle.objects.exists()
+
+
+@pytest.mark.django_db
+def test_crear_detalle_que_hace_exceder_el_maximo_de_la_factura_da_400(api_client, factura):
+    factura.impuestos = 0
+    factura.save()
+    crear_detalle(factura, cantidad=1, precio_unitario=Decimal("9999999999.00"), subtotal=Decimal("9999999999.00"))
+    factura.recalcular_totales()
+    factura.save(update_fields=["subtotal", "total"])
+
+    response = api_client.post(
+        "/api/contabilidad/facturas-detalle/",
+        payload_detalle(factura, cantidad=1, precio_unitario="5.00"),
+    )
+
+    assert response.status_code == 400
+    assert "non_field_errors" in response.data
+    assert FacturaDetalle.objects.count() == 1
