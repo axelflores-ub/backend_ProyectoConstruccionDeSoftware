@@ -2,10 +2,11 @@
 import re
 from decimal import ROUND_HALF_UP, Decimal
 
-from apps.SCM.models import MovimientoInventario, Producto
 from django.db import transaction
 from django.db.models import Sum
 from rest_framework import status
+
+from apps.SCM.models import MovimientoInventario, Producto
 
 from .models import (
     Anulacion,
@@ -57,8 +58,8 @@ class Conflicto(ErrorDeNegocio):
 ESTADOS_DEVOLVIBLES = (EstadoOrdenVenta.PENDIENTE, EstadoOrdenVenta.DEVOLUCION_PARCIAL)
 
 
-def normalizar_cuit(valor):
-    """Deja solo los dígitos: '20-12345678-9' y '20123456789' son el mismo CUIT."""
+def normalizar_cuil(valor):
+    """Deja solo los dígitos: '20-12345678-9' y '20123456789' son el mismo CUIL."""
     return re.sub(r"\D", "", str(valor or ""))
 
 
@@ -90,12 +91,12 @@ def acumular_cantidades(items, campo="cantidad"):
     return acumulado
 
 
-def obtener_cliente_activo_por_cuit(cuit):
-    """Busca al cliente por CUIT. 404 si no existe, 409 si está dado de baja."""
-    cliente = Cliente.objects.filter(cuit=cuit).first()
+def obtener_cliente_activo_por_cuil(cuil):
+    """Busca al cliente por CUIL. 404 si no existe, 409 si está dado de baja."""
+    cliente = Cliente.objects.filter(cuil=cuil).first()
     if cliente is None:
         raise NoEncontrado(
-            "No existe un cliente con ese CUIT. Primero hay que darlo de alta en ABM de clientes.",
+            "No existe un cliente con ese CUIL. Primero hay que darlo de alta en ABM de clientes.",
             codigo="cliente_no_encontrado",
         )
     if cliente.estado != Cliente.ESTADO_ACTIVO:
@@ -114,14 +115,14 @@ def _estado_invalido(accion, orden):
 
 
 @transaction.atomic
-def registrar_orden_venta(*, cuit, datos, detalles, usuario=None):
-    """Genera la orden de venta: obtiene el cliente por CUIT, crea el detalle, calcula el
+def registrar_orden_venta(*, cuil, datos, detalles, usuario=None):
+    """Genera la orden de venta: obtiene el cliente por CUIL, crea el detalle, calcula el
     total, descuenta stock y registra un movimiento de inventario SALIDA por producto.
 
     select_for_update bloquea las filas de producto hasta el fin de la transacción,
     evitando que dos órdenes concurrentes descuenten el mismo stock.
     """
-    cliente = obtener_cliente_activo_por_cuit(cuit)
+    cliente = obtener_cliente_activo_por_cuil(cuil)
     cantidad_por_producto = acumular_cantidades(detalles)
 
     productos = {

@@ -35,7 +35,9 @@ def anon_client():
 
 @pytest.fixture
 def cliente(db):
-    return Cliente.objects.create(nombre="Juan Pérez", cuil="20123456789")
+    return Cliente.objects.create(
+        nombre="Juan Pérez", cuil="20123456789", condicion_iva="Consumidor Final"
+    )
 
 
 @pytest.fixture
@@ -57,9 +59,10 @@ def producto(crear_producto):
 
 @pytest.fixture
 def orden(cliente, producto, usuario):
-    """Orden ya registrada: 3 unidades de `producto` (stock 10 -> 7), total 300."""
+    """Orden ya generada: 3 unidades de `producto` (stock 10 -> 7), total 300."""
     return services.registrar_orden_venta(
-        datos={"cliente": cliente, "forma_pago": "EFECTIVO"},
+        cuil=cliente.cuil,
+        datos={"forma_pago": "EFECTIVO"},
         detalles=[{"producto": producto, "cantidad": 3}],
         usuario=usuario,
     )

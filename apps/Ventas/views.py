@@ -83,8 +83,8 @@ class VentasViewSet(viewsets.ModelViewSet):
 class ClienteViewSet(VentasViewSet):
     """
     GET   /api/ventas/clientes/                -> Lista clientes (paginado).
-    GET   /api/ventas/clientes/?cuit=<cuit>    -> Busca por CUIT exacto (acepta guiones).
-    GET   /api/ventas/clientes/?search=<texto> -> Búsqueda libre (CUIT, nombre, email, teléfono).
+    GET   /api/ventas/clientes/?cuil=<cuil>    -> Busca por CUIL exacto (acepta guiones).
+    GET   /api/ventas/clientes/?search=<texto> -> Búsqueda libre (CUIL, nombre, email, teléfono).
     POST  /api/ventas/clientes/                -> Alta (siempre activo, 'AC').
     GET   /api/ventas/clientes/<id_cliente>/   -> Obtiene un cliente.
     PUT   /api/ventas/clientes/<id_cliente>/   -> Actualiza un cliente.
@@ -98,17 +98,17 @@ class ClienteViewSet(VentasViewSet):
     lookup_field = "id_cliente"
     lookup_value_regex = r"\d+"
     http_method_names = ["get", "post", "put", "patch", "head", "options"]
-    search_fields = ["nombre", "email", "telefono", "cuit"]
+    search_fields = ["nombre", "email", "telefono", "cuil"]
     ordering_fields = ["id_cliente", "nombre", "estado"]
 
     def get_queryset(self):
         queryset = super().get_queryset()
-        cuit = self.request.query_params.get("cuit") if self.action == "list" else None
-        if cuit is not None:
-            cuit = services.normalizar_cuit(cuit)
-            if len(cuit) != 11:
-                raise exceptions.ValidationError({"cuit": ["El CUIT debe tener 11 dígitos."]})
-            queryset = queryset.filter(cuit=cuit)
+        cuil = self.request.query_params.get("cuil") if self.action == "list" else None
+        if cuil is not None:
+            cuil = services.normalizar_cuil(cuil)
+            if len(cuil) != 11:
+                raise exceptions.ValidationError({"cuil": ["El CUIL debe tener 11 dígitos."]})
+            queryset = queryset.filter(cuil=cuil)
         return queryset
 
     def perform_create(self, serializer):
@@ -128,14 +128,14 @@ class EstadoOrdenVentaViewSet(VentasViewSet):
 
 
 class OrdenVentaViewSet(VentasViewSet):
-    """Generar una orden de venta (POST, el cliente se obtiene por CUIT), modificar forma
+    """Generar una orden de venta (POST, el cliente se obtiene por CUIL), modificar forma
     de pago y comprobante mientras esté Pendiente (PUT/PATCH) y consultar (GET)."""
 
     queryset = OrdenVenta.objects.select_related("cliente", "estado", "usuario").prefetch_related(
         "detalles__producto"
     )
     http_method_names = ["get", "post", "put", "patch", "head", "options"]
-    search_fields = ["cliente__nombre", "cliente__cuit", "numero_comprobante"]
+    search_fields = ["cliente__nombre", "cliente__cuil", "numero_comprobante"]
     ordering_fields = ["id", "fecha", "total"]
 
     def get_serializer_class(self):

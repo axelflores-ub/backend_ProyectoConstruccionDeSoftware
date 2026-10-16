@@ -7,10 +7,10 @@ from rest_framework.test import APITestCase
 
 from ..models import (
     Cliente,
-    Producto,
     EstadoOrdenVenta,
     OrdenVenta,
     OrdenVentaDetalle,
+    Producto,
 )
 
 

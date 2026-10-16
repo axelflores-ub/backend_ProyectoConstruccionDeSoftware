@@ -1,11 +1,12 @@
 # Modelos (tablas) del módulo. Definí acá tus clases que heredan de models.Model.
 from django.conf import settings
+from django.core.validators import RegexValidator
 from django.db import models
 
 
 class Cliente(models.Model):
     """
-    Modelo que representa la tabla 'cliente'.
+    Modelo que representa la tabla 'cliente'. El CUIL (11 dígitos) identifica al cliente.
     La baja lógica se maneja actualizando el campo 'estado' a 'OF'.
     """
 
@@ -19,21 +20,21 @@ class Cliente(models.Model):
     # En la base la columna se llama "id" (DER); el atributo y la API siguen usando id_cliente.
     id_cliente = models.AutoField(primary_key=True, db_column="id")
     nombre = models.CharField(max_length=150, db_column="nombre")
-    telefono = models.CharField(max_length=50, db_column="telefono", blank=True, null=True)
-    email = models.CharField(max_length=100, db_column="email", blank=True, null=True)
-    direccion = models.CharField(max_length=200, db_column="direccion", blank=True, null=True)
+    telefono = models.CharField(max_length=50, db_column="telefono", blank=True)
+    email = models.CharField(max_length=100, db_column="email", blank=True)
+    direccion = models.CharField(max_length=200, db_column="direccion", blank=True)
     cuil = models.CharField(
-        max_length=20,
+        max_length=11,
+        unique=True,
         db_column="cuil",
-        blank=True,
-        null=True,
-        help_text="Para buscar al cliente por CUIL en Registrar venta.",
+        validators=[RegexValidator(r"^\d{11}$", "El CUIL debe tener 11 dígitos, sin guiones.")],
+        help_text=(
+            "11 dígitos, sin guiones. Se usa para buscar al cliente al generar la orden de venta."
+        ),
     )
     condicion_iva = models.CharField(
         max_length=50,
         db_column="condicion_iva",
-        blank=True,
-        null=True,
         help_text="Usado para sugerir el tipo de comprobante (A/B/C) automáticamente.",
     )
     estado = models.CharField(
@@ -51,6 +52,15 @@ class Cliente(models.Model):
 
 
 class EstadoOrdenVenta(models.Model):
+    """Catálogo fijo de estados. Se carga por migración y la API es de solo lectura:
+    el estado de una orden cambia únicamente con las operaciones propias
+    (generar la orden, anular, registrar una devolución)."""
+
+    PENDIENTE = "Pendiente"
+    ANULADA = "Anulada"
+    DEVOLUCION_PARCIAL = "Devolución parcial"
+    DEVOLUCION_TOTAL = "Devolución total"
+
     nombre = models.CharField(max_length=50, unique=True)
     descripcion = models.CharField(max_length=200, blank=True)
 
@@ -65,6 +75,8 @@ class EstadoOrdenVenta(models.Model):
 
 
 class OrdenVenta(models.Model):
+    """Orden de venta. El cliente se obtiene por CUIL al generarla (no se elige a mano)."""
+
     class FormaPago(models.TextChoices):
         EFECTIVO = "EFECTIVO", "Efectivo"
         DEBITO = "DEBITO", "Débito"
@@ -100,7 +112,6 @@ class OrdenVenta(models.Model):
         max_length=20,
         choices=TipoComprobante.choices,
         blank=True,
-        null=True,
     )
     fecha = models.DateTimeField(auto_now_add=True)
     total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
@@ -144,16 +155,16 @@ class OrdenVentaDetalle(models.Model):
 
 
 class Anulacion(models.Model):
-    """Se crea cuando se anula un comprobante desde la pantalla de
-    Devoluciones (botón 'Anular'). Al anularse, la orden pasa a estado
-    'Anulada'. Una orden solo puede anularse una vez (por eso es OneToOne y el
+    """Se crea cuando se anula una orden desde la pantalla de Devoluciones (botón
+    'Anular'). Solo se puede anular una orden en estado 'Pendiente'; al anularse pasa
+    a 'Anulada'. Una orden solo puede anularse una vez (por eso es OneToOne y el
     related_name va en singular: es una relación 1 a 1, no una colección)."""
 
     orden_venta = models.OneToOneField(
         OrdenVenta, on_delete=models.CASCADE, related_name="anulacion"
     )
     motivo = models.CharField(max_length=100)
-    detalle = models.TextField(blank=True, null=True)
+    detalle = models.TextField(blank=True)
     fecha = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -167,8 +178,9 @@ class Anulacion(models.Model):
 
 
 class NotaCredito(models.Model):
-    """Se genera al hacer una devolución (parcial o total) sobre una orden
-    de venta. Al crearse, la orden pasa a estado 'Devolución parcial'."""
+    """Se genera al hacer una devolución sobre una orden de venta. El monto lo calcula
+    el servidor. Al crearse, la orden pasa a 'Devolución parcial' o, si ya se devolvió
+    todo lo vendido, a 'Devolución total'."""
 
     orden_venta = models.ForeignKey(
         OrdenVenta, on_delete=models.PROTECT, related_name="notas_credito"

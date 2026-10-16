@@ -37,23 +37,23 @@ def _validar_comprobante_unico(valor, instancia=None):
     return valor
 
 
-class CuitField(serializers.CharField):
-    """CUIT estandarizado: acepta '20-12345678-9' o '20123456789' y lo guarda sin guiones."""
+class CuilField(serializers.CharField):
+    """CUIL estandarizado: acepta '20-12345678-9' o '20123456789' y lo guarda sin guiones."""
 
-    default_error_messages = {"cuit_invalido": "El CUIT debe tener 11 dígitos."}
+    default_error_messages = {"cuil_invalido": "El CUIL debe tener 11 dígitos."}
 
     def to_internal_value(self, data):
-        cuit = services.normalizar_cuit(super().to_internal_value(data))
-        if len(cuit) != 11:
-            self.fail("cuit_invalido")
-        return cuit
+        cuil = services.normalizar_cuil(super().to_internal_value(data))
+        if len(cuil) != 11:
+            self.fail("cuil_invalido")
+        return cuil
 
 
 class ClienteSerializer(serializers.ModelSerializer):
     """Serializer del cliente. id_cliente es solo lectura (autogenerado).
     La baja lógica se hace con PATCH {"estado": "OF"}."""
 
-    cuit = CuitField()
+    cuil = CuilField()
 
     class Meta:
         model = Cliente
@@ -63,19 +63,19 @@ class ClienteSerializer(serializers.ModelSerializer):
             "telefono",
             "email",
             "direccion",
-            "cuit",
+            "cuil",
             "condicion_iva",
             "estado",
         ]
         read_only_fields = ["id_cliente"]
 
-    def validate_cuit(self, cuit):
-        existentes = Cliente.objects.filter(cuit=cuit)
+    def validate_cuil(self, cuil):
+        existentes = Cliente.objects.filter(cuil=cuil)
         if self.instance is not None:
             existentes = existentes.exclude(pk=self.instance.pk)
         if existentes.exists():
-            raise services.Conflicto("Ya existe un cliente con ese CUIT.", codigo="cuit_duplicado")
-        return cuit
+            raise services.Conflicto("Ya existe un cliente con ese CUIL.", codigo="cuil_duplicado")
+        return cuil
 
 
 class EstadoOrdenVentaSerializer(serializers.ModelSerializer):
@@ -131,12 +131,12 @@ class OrdenVentaDetalleSerializer(serializers.ModelSerializer):
 
 
 class OrdenVentaSerializer(serializers.ModelSerializer):
-    """Generar una orden de venta. El cliente NO se elige: se obtiene por `cuit`.
+    """Generar una orden de venta. El cliente NO se elige: se obtiene por `cuil`.
     La fecha la completa el servidor. Request y response usan `detalles`."""
 
-    cuit = CuitField(write_only=True)
+    cuil = CuilField(write_only=True)
     cliente_nombre = serializers.CharField(source="cliente.nombre", read_only=True)
-    cliente_cuit = serializers.CharField(source="cliente.cuit", read_only=True)
+    cliente_cuil = serializers.CharField(source="cliente.cuil", read_only=True)
     estado_nombre = serializers.CharField(source="estado.nombre", read_only=True)
     detalles = OrdenVentaDetalleItemSerializer(many=True)
 
@@ -144,10 +144,10 @@ class OrdenVentaSerializer(serializers.ModelSerializer):
         model = OrdenVenta
         fields = [
             "id",
-            "cuit",
+            "cuil",
             "cliente",
             "cliente_nombre",
-            "cliente_cuit",
+            "cliente_cuil",
             "forma_pago",
             "numero_comprobante",
             "tipo_comprobante",
@@ -170,9 +170,9 @@ class OrdenVentaSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         detalles = validated_data.pop("detalles")
-        cuit = validated_data.pop("cuit")
+        cuil = validated_data.pop("cuil")
         return services.registrar_orden_venta(
-            cuit=cuit,
+            cuil=cuil,
             datos=validated_data,
             detalles=detalles,
             usuario=_usuario_autenticado(self.context.get("request")),
