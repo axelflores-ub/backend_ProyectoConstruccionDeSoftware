@@ -8,6 +8,7 @@ Cada serializer corresponde a un modelo del módulo.
 
 from decimal import Decimal
 
+from django.core.validators import MaxLengthValidator
 from django.db import transaction
 from django.db.models import Value
 from django.db.models.functions import Replace
@@ -33,6 +34,8 @@ from .models import (
     ProveedorProducto,
 )
 from .services import tiene_factura_compra
+
+MENSAJE_CUIT_DIGITOS = "El CUIT tiene que tener 11 dígitos. Podés escribirlo con o sin guiones."
 
 TRANSICIONES_ORDEN = {
     ESTADO_PENDIENTE: {ESTADO_APROBADA, ESTADO_RECHAZADA},
@@ -94,8 +97,10 @@ class ProductoDelProveedorSerializer(serializers.Serializer):
         min_value=1,
         error_messages={
             "required": "Falta indicar el producto.",
+            "null": "Falta indicar el producto.",
             "invalid": "El formato de productos no es válido.",
             "min_value": "El formato de productos no es válido.",
+            "max_string_length": "El formato de productos no es válido.",
         },
     )
     precio_compra = serializers.DecimalField(
@@ -103,10 +108,16 @@ class ProductoDelProveedorSerializer(serializers.Serializer):
         decimal_places=2,
         error_messages={
             "required": "Falta el precio de compra.",
+            "null": "Falta el precio de compra.",
             "invalid": "El precio de compra no es válido.",
-            "max_digits": "El precio de compra no es válido.",
-            "max_decimal_places": "El precio de compra no es válido.",
-            "max_whole_digits": "El precio de compra no es válido.",
+            "max_digits": "El precio de compra no puede tener más de {max_digits} dígitos.",
+            "max_decimal_places": (
+                "El precio de compra no puede tener más de {max_decimal_places} decimales."
+            ),
+            "max_whole_digits": (
+                "El precio de compra no puede tener más de {max_whole_digits} dígitos enteros."
+            ),
+            "max_string_length": "El precio de compra no es válido.",
         },
     )
 
@@ -148,16 +159,21 @@ class ProductosConPrecioField(serializers.Field):
 
 class ProveedorSerializer(serializers.ModelSerializer):
     productos = ProductosConPrecioField(
-        error_messages={"required": "Falta indicar el producto."}
+        error_messages={
+            "required": "Falta indicar el producto.",
+            "null": "Falta indicar el producto.",
+        }
     )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # La unicidad la resuelve validate_cuit comparando los 11 dígitos.
+        # La unicidad y los 11 dígitos los resuelve validate_cuit.
+        # Sin el tope de 13 caracteres, un CUIT largo llega al aviso amistoso
+        # en vez de cortarse antes por el tamaño de la columna.
         self.fields["cuit"].validators = [
             validator
             for validator in self.fields["cuit"].validators
-            if not isinstance(validator, UniqueValidator)
+            if not isinstance(validator, UniqueValidator | MaxLengthValidator)
         ]
 
     class Meta:
@@ -179,6 +195,9 @@ class ProveedorSerializer(serializers.ModelSerializer):
                 "error_messages": {
                     "blank": "Falta completar el nombre.",
                     "required": "Falta completar el nombre.",
+                    "null": "Falta completar el nombre.",
+                    "invalid": "El nombre no es válido.",
+                    "max_length": "El nombre no puede tener más de {max_length} caracteres.",
                 },
             },
             "apellido": {
@@ -187,6 +206,9 @@ class ProveedorSerializer(serializers.ModelSerializer):
                 "error_messages": {
                     "blank": "Falta completar el apellido.",
                     "required": "Falta completar el apellido.",
+                    "null": "Falta completar el apellido.",
+                    "invalid": "El apellido no es válido.",
+                    "max_length": "El apellido no puede tener más de {max_length} caracteres.",
                 },
             },
             "cuit": {
@@ -195,13 +217,31 @@ class ProveedorSerializer(serializers.ModelSerializer):
                 "error_messages": {
                     "blank": "Falta completar el CUIT.",
                     "required": "Falta completar el CUIT.",
+                    "null": "Falta completar el CUIT.",
+                    "invalid": MENSAJE_CUIT_DIGITOS,
                     "unique": "Ya existe un proveedor con ese CUIT.",
-                    "max_length": "El CUIT no puede tener más de 13 caracteres.",
+                    "max_length": MENSAJE_CUIT_DIGITOS,
                 },
             },
             "email": {
                 "error_messages": {
                     "invalid": "El email no tiene un formato válido.",
+                    "null": "El email no tiene un formato válido.",
+                    "max_length": "El email no puede tener más de {max_length} caracteres.",
+                },
+            },
+            "telefono": {
+                "error_messages": {
+                    "invalid": "El teléfono no es válido.",
+                    "null": "El teléfono no es válido.",
+                    "max_length": "El teléfono no puede tener más de {max_length} caracteres.",
+                },
+            },
+            "direccion": {
+                "error_messages": {
+                    "invalid": "La dirección no es válida.",
+                    "null": "La dirección no es válida.",
+                    "max_length": "La dirección no puede tener más de {max_length} caracteres.",
                 },
             },
         }
@@ -221,7 +261,7 @@ class ProveedorSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Falta completar el CUIT.")
         canonico = cuit_canonico(value)
         if canonico is None:
-            raise serializers.ValidationError("El CUIT debe tener 11 dígitos (podés usar guiones).")
+            raise serializers.ValidationError(MENSAJE_CUIT_DIGITOS)
         digitos = canonico.replace("-", "")
         existentes = Proveedor.objects.annotate(
             digitos=Replace(
@@ -317,6 +357,10 @@ class EstadoOrdenCompraSerializer(serializers.ModelSerializer):
 
 
 class RenglonOrdenCompraSerializer(serializers.ModelSerializer):
+    default_error_messages = {
+        "invalid": "Cada renglón tiene que ser un objeto, no un {datatype}.",
+    }
+
     class Meta:
         model = OrdenCompraDetalle
         fields = [
@@ -325,11 +369,63 @@ class RenglonOrdenCompraSerializer(serializers.ModelSerializer):
             "cantidad",
             "precio_unitario",
         ]
-        extra_kwargs = {"ordencompradetalle_id": {"read_only": True}}
+        extra_kwargs = {
+            "ordencompradetalle_id": {"read_only": True},
+            "producto_id": {
+                "error_messages": {
+                    "required": "Falta indicar el producto.",
+                    "null": "Falta indicar el producto.",
+                    "invalid": "El producto no es válido.",
+                    "min_value": "El producto no puede ser menor que {min_value}.",
+                    "max_value": "El producto no puede ser mayor que {max_value}.",
+                    "max_string_length": "El producto no es válido.",
+                },
+            },
+            "cantidad": {
+                "error_messages": {
+                    "required": "Falta completar la cantidad.",
+                    "null": "Falta completar la cantidad.",
+                    "invalid": "La cantidad tiene que ser un número entero.",
+                    "min_value": "La cantidad no puede ser menor que {min_value}.",
+                    "max_value": "La cantidad no puede ser mayor que {max_value}.",
+                    "max_string_length": "La cantidad tiene que ser un número entero.",
+                },
+            },
+            "precio_unitario": {
+                "error_messages": {
+                    "required": "Falta completar el precio unitario.",
+                    "null": "Falta completar el precio unitario.",
+                    "invalid": "El precio unitario no es válido.",
+                    "max_string_length": "El precio unitario no es válido.",
+                    "max_digits": "El precio unitario no puede tener más de {max_digits} dígitos.",
+                    "max_decimal_places": (
+                        "El precio unitario no puede tener más de "
+                        "{max_decimal_places} decimales."
+                    ),
+                    "max_whole_digits": (
+                        "El precio unitario no puede tener más de "
+                        "{max_whole_digits} dígitos enteros."
+                    ),
+                },
+            },
+        }
+
+    def validate_precio_unitario(self, value):
+        if value < 0:
+            raise serializers.ValidationError("El precio unitario no puede ser negativo.")
+        return value
 
 
 class OrdenCompraSerializer(serializers.ModelSerializer):
-    detalles = RenglonOrdenCompraSerializer(many=True, required=False)
+    detalles = RenglonOrdenCompraSerializer(
+        many=True,
+        required=False,
+        error_messages={
+            "null": "La orden debe tener al menos un renglón.",
+            "not_a_list": "Los renglones tienen que ser una lista, no un {input_type}.",
+            "empty": "La orden debe tener al menos un renglón.",
+        },
+    )
 
     class Meta:
         model = OrdenCompra
@@ -342,8 +438,47 @@ class OrdenCompraSerializer(serializers.ModelSerializer):
             "detalles",
         ]
         extra_kwargs = {
-            "estado": {"required": False},
-            "total": {"required": False},
+            "proveedor": {
+                "error_messages": {
+                    "required": "Falta indicar el proveedor.",
+                    "null": "Falta indicar el proveedor.",
+                    "does_not_exist": "El proveedor {pk_value} no existe.",
+                    "incorrect_type": "El proveedor tiene que ser un id, no un {data_type}.",
+                },
+            },
+            "estado": {
+                "required": False,
+                "error_messages": {
+                    "null": "El estado no es válido.",
+                    "does_not_exist": "El estado {pk_value} no existe.",
+                    "incorrect_type": "El estado tiene que ser un id, no un {data_type}.",
+                },
+            },
+            "fecha": {
+                "error_messages": {
+                    "required": "Falta completar la fecha.",
+                    "null": "Falta completar la fecha.",
+                    "invalid": "La fecha no es válida. Usá un formato como {format}.",
+                    "date": "La fecha no es válida.",
+                    "make_aware": "La fecha no es válida para la zona {timezone}.",
+                    "overflow": "La fecha no es válida.",
+                },
+            },
+            "total": {
+                "required": False,
+                "error_messages": {
+                    "invalid": "El total no es válido.",
+                    "null": "El total no es válido.",
+                    "max_digits": "El total no puede tener más de {max_digits} dígitos.",
+                    "max_decimal_places": (
+                        "El total no puede tener más de {max_decimal_places} decimales."
+                    ),
+                    "max_whole_digits": (
+                        "El total no puede tener más de {max_whole_digits} dígitos enteros."
+                    ),
+                    "max_string_length": "El total no es válido.",
+                },
+            },
         }
 
     def validate(self, attrs):

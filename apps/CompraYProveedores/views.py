@@ -11,6 +11,7 @@ from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
+from rest_framework.fields import DateTimeField, DecimalField
 from rest_framework.response import Response
 
 from apps.SCM.services import registrar_recepcion_orden_compra
@@ -31,6 +32,76 @@ from .serializers import (
     ProveedorSerializer,
 )
 from .services import marcar_orden_contabilizada, tiene_factura_compra
+
+MENSAJE_NUMERO_FACTURA = "Falta el número de factura."
+LARGO_NUMERO_FACTURA = 50
+
+
+def _numero_de_factura(valor):
+    """El número lo escribe quien manda la orden a finanzas."""
+    if valor is None:
+        valor = ""
+    if not isinstance(valor, str):
+        raise ValidationError({"numero": "El número de factura no es válido."})
+    numero = valor.strip()
+    if not numero:
+        raise ValidationError({"numero": MENSAJE_NUMERO_FACTURA})
+    if len(numero) > LARGO_NUMERO_FACTURA:
+        raise ValidationError(
+            {
+                "numero": (
+                    "El número de factura no puede tener más de "
+                    f"{LARGO_NUMERO_FACTURA} caracteres."
+                )
+            }
+        )
+    return numero
+
+
+def _fecha_de_factura(valor):
+    """Vacío significa ahora. Un texto que no es fecha avisa antes de llegar a finanzas."""
+    if valor in (None, ""):
+        return None
+    campo = DateTimeField(
+        error_messages={
+            "invalid": "La fecha no es válida. Usá un formato como {format}.",
+            "date": "La fecha no es válida.",
+            "make_aware": "La fecha no es válida para la zona {timezone}.",
+            "overflow": "La fecha no es válida.",
+            "null": "La fecha no es válida.",
+        }
+    )
+    try:
+        campo.run_validation(valor)
+    except ValidationError as exc:
+        raise ValidationError({"fecha": exc.detail}) from exc
+    return valor
+
+
+def _impuestos_de_factura(valor):
+    """Si no vienen, la factura usa 0. Si vienen mal, el aviso es de este módulo."""
+    if valor in (None, ""):
+        return "0.00"
+    campo = DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        error_messages={
+            "invalid": "Los impuestos no son válidos.",
+            "null": "Los impuestos no son válidos.",
+            "max_digits": "Los impuestos no pueden tener más de {max_digits} dígitos.",
+            "max_decimal_places": (
+                "Los impuestos no pueden tener más de {max_decimal_places} decimales."
+            ),
+            "max_whole_digits": (
+                "Los impuestos no pueden tener más de {max_whole_digits} dígitos enteros."
+            ),
+            "max_string_length": "Los impuestos no son válidos.",
+        },
+    )
+    try:
+        return str(campo.run_validation(valor))
+    except ValidationError as exc:
+        raise ValidationError({"impuestos": exc.detail}) from exc
 
 
 class ProveedorViewSet(viewsets.ModelViewSet):
@@ -140,9 +211,9 @@ class OrdenCompraViewSet(viewsets.ModelViewSet):
         from apps.ContabilidadFinanzas.serializers import FacturaCabeceraSerializer
 
         self.get_object()
-        numero = str(request.data.get("numero", "")).strip()
-        if not numero:
-            raise ValidationError({"numero": "Falta el número de factura."})
+        numero = _numero_de_factura(request.data.get("numero", ""))
+        fecha = _fecha_de_factura(request.data.get("fecha"))
+        impuestos = _impuestos_de_factura(request.data.get("impuestos", "0.00"))
 
         with transaction.atomic():
             orden = OrdenCompra.objects.select_for_update(of=("self",)).get(pk=pk)
@@ -158,8 +229,8 @@ class OrdenCompraViewSet(viewsets.ModelViewSet):
                 "tipo": "COMPRA",
                 "orden_compra_id": orden.pk,
                 "numero": numero,
-                "fecha": request.data.get("fecha") or timezone.now(),
-                "impuestos": request.data.get("impuestos", "0.00"),
+                "fecha": fecha or timezone.now(),
+                "impuestos": impuestos,
                 "detalles": [
                     {
                         "producto_id": detalle.producto_id,

@@ -129,13 +129,127 @@ def test_cuit_con_y_sin_guiones_es_el_mismo_proveedor(auth_client):
 
 
 @pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("codigo", "cuit"),
+    [
+        ("CUIT-10", "2044215209"),
+        ("CUIT-12", "204421520999"),
+        ("CUIT-14", "20-442152099-9"),
+        ("CUIT-LET", "abcdefghijk"),
+    ],
+)
+def test_el_cuit_avisa_si_no_tiene_11_digitos(auth_client, codigo, cuit):
+    producto = _producto(codigo)
+    response = auth_client.post(
+        "/api/compras/proveedores/",
+        {
+            "nombre": "CUIT corto o largo",
+            "apellido": "SA",
+            "cuit": cuit,
+            "productos": _catalogo(producto.pk),
+        },
+        format="json",
+    )
+    assert response.status_code == 400
+    assert response.data["cuit"] == [
+        "El CUIT tiene que tener 11 dígitos. Podés escribirlo con o sin guiones."
+    ]
+    assert Proveedor.objects.filter(nombre="CUIT corto o largo").count() == 0
+
+
+@pytest.mark.django_db
+def test_el_cuit_con_espacios_y_11_digitos_se_guarda(auth_client):
+    producto = _producto("CUIT-ESP")
+    alta = auth_client.post(
+        "/api/compras/proveedores/",
+        {
+            "nombre": "CUIT con espacios",
+            "apellido": "SA",
+            "cuit": "20 4421 5209 9",
+            "productos": _catalogo(producto.pk),
+        },
+        format="json",
+    )
+    assert alta.status_code == 201, alta.data
+    assert alta.data["cuit"] == "20-44215209-9"
+
+
+@pytest.mark.django_db
 def test_proveedor_sin_datos_mensajes_claros(auth_client):
     response = auth_client.post("/api/compras/proveedores/", {}, format="json")
     assert response.status_code == 400
     assert "Falta completar el nombre." in str(response.data.get("nombre", []))
     assert "Falta completar el apellido." in str(response.data.get("apellido", []))
     assert "Falta completar el CUIT." in str(response.data.get("cuit", []))
-    assert "productos" in response.data
+    assert "Falta indicar el producto." in str(response.data.get("productos", []))
+
+
+@pytest.mark.django_db
+def test_los_textos_del_proveedor_avisan_si_no_entran(auth_client):
+    producto = _producto("MSG-PRV")
+    base = {
+        "nombre": "Avisos",
+        "apellido": "SA",
+        "cuit": "30111000991",
+        "productos": _catalogo(producto.pk),
+    }
+
+    nombre = auth_client.post(
+        "/api/compras/proveedores/",
+        {**base, "nombre": "N" * 151},
+        format="json",
+    )
+    assert nombre.status_code == 400
+    assert "El nombre no puede tener más de 150 caracteres." in str(nombre.data["nombre"])
+
+    apellido = auth_client.post(
+        "/api/compras/proveedores/",
+        {**base, "apellido": "A" * 151},
+        format="json",
+    )
+    assert apellido.status_code == 400
+    assert "El apellido no puede tener más de 150 caracteres." in str(apellido.data["apellido"])
+
+    email = auth_client.post(
+        "/api/compras/proveedores/",
+        {**base, "email": "no-es-mail"},
+        format="json",
+    )
+    assert email.status_code == 400
+    assert "El email no tiene un formato válido." in str(email.data["email"])
+
+    telefono = auth_client.post(
+        "/api/compras/proveedores/",
+        {**base, "telefono": "1" * 51},
+        format="json",
+    )
+    assert telefono.status_code == 400
+    assert "El teléfono no puede tener más de 50 caracteres." in str(telefono.data["telefono"])
+
+    direccion = auth_client.post(
+        "/api/compras/proveedores/",
+        {**base, "direccion": "D" * 201},
+        format="json",
+    )
+    assert direccion.status_code == 400
+    assert "La dirección no puede tener más de 200 caracteres." in str(direccion.data["direccion"])
+
+    sin_producto = auth_client.post(
+        "/api/compras/proveedores/",
+        {**base, "productos": None},
+        format="json",
+    )
+    assert sin_producto.status_code == 400
+    assert "Falta indicar el producto." in str(sin_producto.data["productos"])
+
+    sin_precio = auth_client.post(
+        "/api/compras/proveedores/",
+        {**base, "productos": [{"producto_id": producto.pk, "precio_compra": None}]},
+        format="json",
+    )
+    assert sin_precio.status_code == 400
+    assert "Falta el precio de compra." in str(sin_precio.data["productos"])
+    assert Proveedor.objects.filter(nombre="Avisos").count() == 0
 
 
 @pytest.mark.django_db
@@ -417,6 +531,90 @@ def _id_estado(client, nombre):
         if estado["nombre"] == nombre:
             return estado["estadoordencompra_id"]
     raise AssertionError(f"No está el estado {nombre}")
+
+
+@pytest.mark.django_db
+def test_los_campos_de_la_orden_avisan_en_castellano(auth_client):
+    vacia = auth_client.post("/api/compras/ordenes-compra/", {}, format="json")
+    assert vacia.status_code == 400
+    assert "Falta indicar el proveedor." in str(vacia.data["proveedor"])
+    assert "Falta completar la fecha." in str(vacia.data["fecha"])
+
+    producto = _producto("MSG-OC")
+    proveedor_id = _proveedor(auth_client, "30111999881", producto.pk)
+    sin_renglones = auth_client.post(
+        "/api/compras/ordenes-compra/",
+        {
+            "proveedor": proveedor_id,
+            "fecha": "2026-09-04T10:00:00-03:00",
+        },
+        format="json",
+    )
+    assert sin_renglones.status_code == 400
+    assert "La orden debe tener al menos un renglón." in str(sin_renglones.data["detalles"])
+    renglon = {"producto_id": producto.pk, "cantidad": 1, "precio_unitario": "10.00"}
+    base = {
+        "proveedor": proveedor_id,
+        "fecha": "2026-09-04T10:00:00-03:00",
+        "detalles": [renglon],
+    }
+
+    fecha = auth_client.post(
+        "/api/compras/ordenes-compra/",
+        {**base, "fecha": "mañana"},
+        format="json",
+    )
+    assert fecha.status_code == 400
+    assert "La fecha no es válida." in str(fecha.data["fecha"])
+
+    ajeno = auth_client.post(
+        "/api/compras/ordenes-compra/",
+        {**base, "proveedor": 999999},
+        format="json",
+    )
+    assert ajeno.status_code == 400
+    assert "El proveedor 999999 no existe." in str(ajeno.data["proveedor"])
+
+    cantidad = auth_client.post(
+        "/api/compras/ordenes-compra/",
+        {**base, "detalles": [{**renglon, "cantidad": -1}]},
+        format="json",
+    )
+    assert cantidad.status_code == 400
+    assert "La cantidad no puede ser menor que 0." in str(cantidad.data)
+
+    precio = auth_client.post(
+        "/api/compras/ordenes-compra/",
+        {**base, "detalles": [{**renglon, "precio_unitario": "-1.00"}]},
+        format="json",
+    )
+    assert precio.status_code == 400
+    assert "El precio unitario no puede ser negativo." in str(precio.data)
+
+    texto = auth_client.post(
+        "/api/compras/ordenes-compra/",
+        {**base, "detalles": [{**renglon, "precio_unitario": "abc"}]},
+        format="json",
+    )
+    assert texto.status_code == 400
+    assert "El precio unitario no es válido." in str(texto.data)
+
+    no_es_lista = auth_client.post(
+        "/api/compras/ordenes-compra/",
+        {**base, "detalles": "un renglón"},
+        format="json",
+    )
+    assert no_es_lista.status_code == 400
+    assert "Los renglones tienen que ser una lista" in str(no_es_lista.data)
+
+    no_es_objeto = auth_client.post(
+        "/api/compras/ordenes-compra/",
+        {**base, "detalles": ["un renglón"]},
+        format="json",
+    )
+    assert no_es_objeto.status_code == 400
+    assert "Cada renglón tiene que ser un objeto" in str(no_es_objeto.data)
+    assert OrdenCompra.objects.count() == 0
 
 
 @pytest.mark.django_db
@@ -1337,6 +1535,30 @@ def test_enviar_a_finanzas_sin_numero_no_cambia_la_orden(auth_client):
     )
     assert respuesta.status_code == 400
     assert "Falta el número de factura." in str(respuesta.data)
+
+    larga = auth_client.post(
+        f"/api/compras/ordenes-compra/{oc_id}/enviar-a-finanzas/",
+        {"numero": "F" * 51},
+        format="json",
+    )
+    assert larga.status_code == 400
+    assert "El número de factura no puede tener más de 50 caracteres." in str(larga.data)
+
+    fecha = auth_client.post(
+        f"/api/compras/ordenes-compra/{oc_id}/enviar-a-finanzas/",
+        {"numero": "C-FECHA", "fecha": "mañana"},
+        format="json",
+    )
+    assert fecha.status_code == 400
+    assert "La fecha no es válida." in str(fecha.data)
+
+    impuestos = auth_client.post(
+        f"/api/compras/ordenes-compra/{oc_id}/enviar-a-finanzas/",
+        {"numero": "C-IMP", "impuestos": "veintiuno"},
+        format="json",
+    )
+    assert impuestos.status_code == 400
+    assert "Los impuestos no son válidos." in str(impuestos.data)
     assert _estado(auth_client, oc_id)["estado"] == _id_estado(auth_client, "Recibida")
     assert not FacturaCabecera.objects.exists()
 
