@@ -90,7 +90,7 @@ def test_recibida_con_producto_inexistente_no_cambia_nada(api_client, producto, 
     assert MovimientoInventario.objects.count() == 0
 
 
-@pytest.mark.django_db(transaction=True)
+@pytest.mark.django_db(transaction=True, serialized_rollback=True)
 def test_doble_recepcion_concurrente_no_duplica_stock(api_client, producto, orden_pendiente):
     """Dos requests simultáneos que intentan marcar la misma orden como Recibida
     no deben duplicar el stock gracias al SELECT FOR UPDATE de perform_update.
