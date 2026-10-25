@@ -1359,3 +1359,30 @@ def test_patch_a_contabilizado_si_la_factura_ya_existe(auth_client):
     assert respuesta.status_code == 200, respuesta.data
     assert respuesta.data["estado"] == _id_estado(auth_client, "Contabilizado")
     assert _stock(auth_client, producto.pk) == 1
+
+
+@pytest.mark.django_db
+def test_borrar_proveedor_con_ordenes_da_409(auth_client):
+    proveedor = Proveedor.objects.create(nombre="Con OC", cuit="30111111111")
+    estado, _ = EstadoOrdenCompra.objects.get_or_create(nombre="Pendiente")
+    OrdenCompra.objects.create(
+        proveedor=proveedor, estado=estado, fecha=timezone.now(), total=Decimal("1.00")
+    )
+    auth_client.raise_request_exception = False
+
+    respuesta = auth_client.delete(f"/api/compras/proveedores/{proveedor.pk}/")
+
+    assert respuesta.status_code == 409
+    assert respuesta.json()["detail"] == (
+        "No se puede eliminar el proveedor porque tiene registros asociados: órdenes de compra."
+    )
+    assert Proveedor.objects.filter(pk=proveedor.pk).exists()
+
+
+@pytest.mark.django_db
+def test_borrar_proveedor_sin_ordenes_sigue_dando_204(auth_client):
+    proveedor = Proveedor.objects.create(nombre="Sin OC", cuit="30222222222")
+
+    respuesta = auth_client.delete(f"/api/compras/proveedores/{proveedor.pk}/")
+
+    assert respuesta.status_code == 204

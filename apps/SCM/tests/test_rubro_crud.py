@@ -97,22 +97,20 @@ def test_borrar_rubro_sin_productos(api_client):
     assert not Rubro.objects.filter(pk=rubro.pk).exists()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG: borrar un rubro con productos lanza ProtectedError y responde 500; "
-    "debería ser un error controlado (400/409).",
-)
 def test_borrar_rubro_con_productos_da_error_controlado(api_client, producto):
     api_client.raise_request_exception = False
 
     response = api_client.delete(f"{URL}{producto.rubro_id}/")
 
-    assert response.status_code in (400, 409)
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "No se puede eliminar el rubro porque tiene registros asociados: productos."
+    )
     assert Rubro.objects.filter(pk=producto.rubro_id).exists()
 
 
 def test_borrar_rubro_con_productos_no_lo_elimina(api_client, producto):
-    """Aunque hoy la respuesta sea 500, el rubro y su producto deben seguir existiendo."""
+    """Ante el 409, el rubro y su producto deben seguir existiendo."""
     api_client.raise_request_exception = False
 
     api_client.delete(f"{URL}{producto.rubro_id}/")
