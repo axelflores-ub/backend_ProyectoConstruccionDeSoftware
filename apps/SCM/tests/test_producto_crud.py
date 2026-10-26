@@ -78,11 +78,6 @@ def test_borrar_producto_sin_movimientos(api_client, producto):
     assert not Producto.objects.filter(pk=producto.pk).exists()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG: borrar un producto con movimientos lanza ProtectedError y responde 500; "
-    "debería ser un error controlado (400/409).",
-)
 def test_borrar_producto_con_movimientos_da_error_controlado(api_client, producto):
     api_client.post(
         "/api/scm/movimientos-inventario/",
@@ -93,12 +88,33 @@ def test_borrar_producto_con_movimientos_da_error_controlado(api_client, product
 
     response = api_client.delete(f"{URL}{producto.id}/")
 
-    assert response.status_code in (400, 409)
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "No se puede eliminar el producto porque tiene registros asociados: movimientos de inventario."
+    )
+    assert Producto.objects.filter(pk=producto.pk).exists()
+
+
+def test_borrar_producto_con_detalle_de_venta_da_409(api_client, producto):
+    from apps.Ventas.models import Cliente, EstadoOrdenVenta, OrdenVenta, OrdenVentaDetalle
+
+    cliente = Cliente.objects.create(nombre="Cliente Test")
+    estado, _ = EstadoOrdenVenta.objects.get_or_create(nombre="Pendiente")
+    orden = OrdenVenta.objects.create(cliente=cliente, estado=estado, forma_pago="EFECTIVO")
+    OrdenVentaDetalle.objects.create(
+        orden_venta=orden, producto=producto, cantidad=1, precio_unitario="10.00"
+    )
+    api_client.raise_request_exception = False
+
+    response = api_client.delete(f"{URL}{producto.id}/")
+
+    assert response.status_code == 409
+    assert "detalles de orden de venta" in response.json()["detail"]
     assert Producto.objects.filter(pk=producto.pk).exists()
 
 
 def test_borrar_producto_con_movimientos_no_lo_elimina(api_client, producto):
-    """Aunque hoy la respuesta sea 500, el producto y su historial deben conservarse."""
+    """Ante el 409, el producto y su historial deben conservarse."""
     api_client.post(
         "/api/scm/movimientos-inventario/",
         {"producto": producto.id, "tipo": "ENTRADA", "cantidad": 1},
