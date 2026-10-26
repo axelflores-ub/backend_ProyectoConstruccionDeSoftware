@@ -29,6 +29,17 @@ def test_crear_producto_empieza_con_stock_cero(api_client, rubro):
     assert response.data["rubro_nombre"] == "Cemento"
 
 
+def test_crear_producto_sin_precio_queda_en_cero(api_client, rubro):
+    # El precio de compra vive en proveedor_productos: el alta no lo envía.
+    response = api_client.post(
+        "/api/scm/productos/",
+        {"codigo": "ARE-002", "nombre": "Arena fina", "rubro": rubro.id},
+        format="json",
+    )
+    assert response.status_code == 201
+    assert response.data["precio"] == "0.00"
+
+
 def test_crear_producto_precio_invalido(api_client, rubro):
     response = api_client.post(
         "/api/scm/productos/",

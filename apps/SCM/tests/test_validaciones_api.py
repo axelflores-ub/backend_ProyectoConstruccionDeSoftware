@@ -125,4 +125,6 @@ def test_codigo_duplicado_da_400(api_client, producto):
 def test_producto_sin_campos_obligatorios_da_400(api_client):
     response = api_client.post(URL_PRODUCTOS, {}, format="json")
     assert response.status_code == 400
-    assert {"codigo", "nombre", "precio"} <= set(response.data)
+    assert {"codigo", "nombre"} <= set(response.data)
+    # El precio ya no es obligatorio: toma 0 por defecto.
+    assert "precio" not in response.data
