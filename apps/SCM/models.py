@@ -26,7 +26,7 @@ class Producto(models.Model):
     codigo = models.CharField(max_length=50, unique=True)
     nombre = models.CharField(max_length=150)
     descripcion = models.CharField(max_length=255, blank=True)
-    precio = models.DecimalField(max_digits=12, decimal_places=2)
+    precio = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     rubro = models.ForeignKey(
         Rubro,
         on_delete=models.PROTECT,
