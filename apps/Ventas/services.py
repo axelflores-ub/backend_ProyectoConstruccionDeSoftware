@@ -3,9 +3,10 @@ import re
 from decimal import ROUND_HALF_UP, Decimal
 
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Max, Sum
 from rest_framework import status
 
+from apps.CompraYProveedores.models import VINCULO_ACTIVO, ProveedorProducto
 from apps.SCM.models import MovimientoInventario, Producto
 
 from .models import (
@@ -56,6 +57,47 @@ class Conflicto(ErrorDeNegocio):
 
 
 ESTADOS_DEVOLVIBLES = (EstadoOrdenVenta.PENDIENTE, EstadoOrdenVenta.DEVOLUCION_PARCIAL)
+
+# Margen de venta sobre el precio de compra del proveedor (30 %). Se cambia solo acá.
+MARGEN_VENTA = Decimal("0.30")
+
+
+def calcular_precio_venta(precio_compra):
+    """Precio de venta = precio de compra + MARGEN_VENTA, redondeado a 2 decimales."""
+    return (Decimal(precio_compra) * (1 + MARGEN_VENTA)).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
+
+
+def precio_de_venta(precio_compra_maximo, precio_historico=None):
+    """Precio de venta de un producto, o None si no se puede determinar.
+
+    1) Si algún proveedor activo tiene precio de compra, se usa el MÁS ALTO y se le suma
+       el margen (así la venta nunca queda por debajo del margen sobre ningún proveedor).
+    2) Si no hay precio de compra, se usa el precio histórico guardado en el producto
+       (productos anteriores al cambio de proveedores), siempre que sea mayor a 0.
+    """
+    if precio_compra_maximo:
+        return calcular_precio_venta(precio_compra_maximo)
+    if precio_historico and precio_historico > 0:
+        return precio_historico
+    return None
+
+
+def precios_de_venta(productos):
+    """{producto_id: precio de venta o None} para una colección de productos."""
+    maximos = {
+        fila["producto_id"]: fila["maximo"]
+        for fila in ProveedorProducto.objects.filter(
+            producto_id__in=[p.id for p in productos],
+            activo=VINCULO_ACTIVO,
+            precio_compra__gt=0,
+        )
+        .values("producto_id")
+        .annotate(maximo=Max("precio_compra"))
+        .order_by()
+    }
+    return {p.id: precio_de_venta(maximos.get(p.id), p.precio) for p in productos}
 
 
 def normalizar_cuil(valor):
@@ -118,6 +160,8 @@ def _estado_invalido(accion, orden):
 def registrar_orden_venta(*, cuil, datos, detalles, usuario=None):
     """Genera la orden de venta: obtiene el cliente por CUIL, crea el detalle, calcula el
     total, descuenta stock y registra un movimiento de inventario SALIDA por producto.
+    El precio unitario lo calcula el sistema (precio de compra del proveedor + 30 %) y
+    queda guardado en el detalle.
 
     select_for_update bloquea las filas de producto hasta el fin de la transacción,
     evitando que dos órdenes concurrentes descuenten el mismo stock.
@@ -129,6 +173,15 @@ def registrar_orden_venta(*, cuil, datos, detalles, usuario=None):
         p.id: p
         for p in Producto.objects.select_for_update().filter(id__in=cantidad_por_producto.keys())
     }
+    precios = precios_de_venta(list(productos.values()))
+    for producto in productos.values():
+        if precios[producto.id] is None:
+            raise Conflicto(
+                f"El producto '{producto.nombre}' no tiene precio de venta: ningún proveedor "
+                "activo le cargó un precio de compra.",
+                codigo="producto_sin_precio",
+            )
+
     for producto_id, cantidad_total in cantidad_por_producto.items():
         producto = productos[producto_id]
         if producto.stock_actual < cantidad_total:
@@ -148,14 +201,15 @@ def registrar_orden_venta(*, cuil, datos, detalles, usuario=None):
         producto = productos[item["producto"].id]
         cantidad = item["cantidad"]
         descuento = item.get("descuento") or Decimal("0")
+        precio = precios[producto.id]
         OrdenVentaDetalle.objects.create(
             orden_venta=orden,
             producto=producto,
             cantidad=cantidad,
-            precio_unitario=producto.precio,
+            precio_unitario=precio,
             descuento=descuento,
         )
-        total += (producto.precio * cantidad) - descuento
+        total += (precio * cantidad) - descuento
 
     for producto_id, cantidad_total in cantidad_por_producto.items():
         producto = productos[producto_id]

@@ -4,6 +4,8 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
+from apps.SCM.models import Producto
+
 from . import services
 from .models import (
     Anulacion,
@@ -78,6 +80,20 @@ class ClienteSerializer(serializers.ModelSerializer):
         return cuil
 
 
+class ProductoVentaSerializer(serializers.ModelSerializer):
+    """Producto con su precio de venta calculado (solo lectura), para el buscador de
+    'Registrar venta'. precio_venta es null si el producto todavía no tiene precio."""
+
+    precio_venta = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Producto
+        fields = ["id", "codigo", "nombre", "stock_actual", "precio_venta"]
+
+    def get_precio_venta(self, producto):
+        return services.precio_de_venta(producto.precio_compra_maximo, producto.precio)
+
+
 class EstadoOrdenVentaSerializer(serializers.ModelSerializer):
     class Meta:
         model = EstadoOrdenVenta
@@ -86,7 +102,7 @@ class EstadoOrdenVentaSerializer(serializers.ModelSerializer):
 
 class OrdenVentaDetalleItemSerializer(serializers.ModelSerializer):
     """Ítem de la orden: el cliente envía producto, cantidad y descuento; el precio
-    unitario lo toma el servidor del producto."""
+    unitario lo calcula el servidor (precio de compra del proveedor + 30 %)."""
 
     producto_nombre = serializers.CharField(source="producto.nombre", read_only=True)
     subtotal = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)

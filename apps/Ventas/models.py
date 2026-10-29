@@ -17,6 +17,12 @@ class Cliente(models.Model):
     ESTADO_ACTIVO = Estado.ACTIVO
     ESTADO_BAJA = Estado.BAJA
 
+    class CondicionIva(models.TextChoices):
+        RESPONSABLE_INSCRIPTO = "Responsable Inscripto", "Responsable Inscripto"
+        MONOTRIBUTISTA = "Monotributista", "Monotributista"
+        CONSUMIDOR_FINAL = "Consumidor Final", "Consumidor Final"
+        EXENTO = "Exento", "Exento"
+
     # En la base la columna se llama "id" (DER); el atributo y la API siguen usando id_cliente.
     id_cliente = models.AutoField(primary_key=True, db_column="id")
     nombre = models.CharField(max_length=150, db_column="nombre")
@@ -35,6 +41,7 @@ class Cliente(models.Model):
     condicion_iva = models.CharField(
         max_length=50,
         db_column="condicion_iva",
+        choices=CondicionIva.choices,
         help_text="Usado para sugerir el tipo de comprobante (A/B/C) automáticamente.",
     )
     estado = models.CharField(

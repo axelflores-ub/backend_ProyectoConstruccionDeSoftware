@@ -8,11 +8,13 @@ from .views import (
     NotaCreditoViewSet,
     OrdenVentaDetalleViewSet,
     OrdenVentaViewSet,
+    ProductoVentaViewSet,
 )
 
 router = DefaultRouter()
 
 router.register("clientes", ClienteViewSet, basename="cliente")
+router.register("productos-venta", ProductoVentaViewSet, basename="productoventa")
 router.register("estados-orden-venta", EstadoOrdenVentaViewSet, basename="estadoordenventa")
 router.register("ordenes-venta", OrdenVentaViewSet, basename="ordenventa")
 router.register("ordenes-venta-detalle", OrdenVentaDetalleViewSet, basename="ordenventadetalle")

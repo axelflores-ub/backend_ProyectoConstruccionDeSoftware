@@ -1,9 +1,13 @@
 # Vistas del módulo (DRF): ViewSets con la lógica de cada endpoint.
 # Permisos: se usa el default global de settings.py (IsAuthenticated -> requiere JWT).
 # Errores: todos los ViewSets usan el mismo formato de error (ver manejador_de_errores).
+from django.db.models import Max, Q
 from rest_framework import exceptions, status, viewsets
 from rest_framework.response import Response
 from rest_framework.views import exception_handler as drf_exception_handler
+
+from apps.CompraYProveedores.models import VINCULO_ACTIVO
+from apps.SCM.models import Producto
 
 from . import services
 from .models import (
@@ -24,6 +28,7 @@ from .serializers import (
     OrdenVentaDetalleSerializer,
     OrdenVentaSerializer,
     OrdenVentaUpdateSerializer,
+    ProductoVentaSerializer,
 )
 
 CODIGOS_POR_ESTADO = {
@@ -114,6 +119,26 @@ class ClienteViewSet(VentasViewSet):
     def perform_create(self, serializer):
         # Un cliente nuevo siempre se crea activo, sin importar lo que venga en el body.
         serializer.save(estado=Cliente.ESTADO_ACTIVO)
+
+
+class ProductoVentaViewSet(VentasViewSet):
+    """Productos con su precio de venta calculado (precio de compra del proveedor + 30 %).
+    Solo lectura. Busca por código o nombre (?search=). precio_venta es null si el producto
+    no tiene precio y, por lo tanto, no se puede vender."""
+
+    queryset = Producto.objects.annotate(
+        precio_compra_maximo=Max(
+            "vinculos_proveedor__precio_compra",
+            filter=Q(
+                vinculos_proveedor__activo=VINCULO_ACTIVO,
+                vinculos_proveedor__precio_compra__gt=0,
+            ),
+        )
+    ).order_by("nombre")
+    serializer_class = ProductoVentaSerializer
+    http_method_names = ["get", "head", "options"]
+    search_fields = ["codigo", "nombre"]
+    ordering_fields = ["nombre", "codigo", "stock_actual"]
 
 
 class EstadoOrdenVentaViewSet(VentasViewSet):
