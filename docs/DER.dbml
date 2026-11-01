@@ -1,149 +1,194 @@
-// Diagrama Entidad-Relación de CorralónDB
-// Pegar en https://dbdiagram.io para visualizarlo.
-// Es la fuente de verdad del modelo: los `db_table` de los modelos Django
-// respetan estos nombres.
-
-Table privilegio {
+Table auth_user {
   id int [pk, increment]
-  nombre varchar(50) [not null, unique]
-  descripcion varchar(150)
-}
-
-Table usuario {
-  id int [pk, increment]
-  nombre varchar(100) [not null]
-  email varchar(150) [unique]
-  password varchar(255) [not null]
-  privilegio_id int [ref: > privilegio.id]
+  username varchar(150) [not null, unique]
+  password varchar(128) [not null]
+  first_name varchar(150) [not null]
+  last_name varchar(150) [not null]
+  email varchar(254) [not null]
+  is_staff boolean [not null, default: false]
+  is_active boolean [not null, default: true]
+  is_superuser boolean [not null, default: false]
+  last_login timestamp
+  date_joined timestamp [not null]
+  Note: 'Modelo estándar de Django; incluye relaciones a grupos y permisos que se omiten en este DER de negocio.'
 }
 
 Table rubro {
-  id int [pk, increment]
-  nombre varchar(100) [not null]
-  descripcion varchar(200)
+  id bigint [pk, increment]
+  nombre varchar(100) [not null, unique]
+  descripcion varchar(200) [not null, default: '']
 }
 
 Table producto {
-  id int [pk, increment]
+  id bigint [pk, increment]
   codigo varchar(50) [not null, unique]
   nombre varchar(150) [not null]
-  descripcion varchar(255)
-  precio decimal(12,2) [not null]
-  rubro_id int [ref: > rubro.id]
+  descripcion varchar(255) [not null, default: '']
+  precio decimal(12,2) [not null, default: 0, note: 'Precio del producto; Ventas lo utiliza para generar detalles.']
+  rubro_id bigint [ref: > rubro.id, null]
   stock_actual int [not null, default: 0]
   stock_minimo int [not null, default: 0]
 }
 
 Table movimiento_inventario {
-  id int [pk, increment]
-  producto_id int [not null, ref: > producto.id]
-  usuario_id int [not null, ref: > usuario.id]
-  tipo varchar(20) [not null]
+  id bigint [pk, increment]
+  producto_id bigint [not null, ref: > producto.id]
+  usuario_id int [not null, ref: > auth_user.id]
+  tipo varchar(20) [not null, note: 'ENTRADA, SALIDA, AJUSTE, DEVOLUCION']
   cantidad int [not null]
   fecha timestamp [not null]
-  observacion varchar(255)
+  observacion varchar(255) [not null, default: '']
 }
 
 Table proveedor {
-  id int [pk, increment]
+  proveedor_id int [pk, increment]
   nombre varchar(150) [not null]
-  telefono varchar(50)
-  email varchar(150)
-  direccion varchar(200)
+  apellido varchar(150) [not null, default: '']
+  email varchar(150) [not null, default: '']
+  telefono varchar(50) [not null, default: '']
+  cuit varchar(13) [not null, unique]
+  direccion varchar(200) [not null, default: '']
+}
+
+Table proveedor_productos {
+  id bigint [pk, increment]
+  proveedor_id int [not null, ref: > proveedor.proveedor_id]
+  producto_id bigint [not null, ref: > producto.id]
+  precio_compra decimal(12,2) [null]
+  activo smallint [not null, default: 1, note: 'CHECK activo IN (0,1); 1 vigente, 0 baja lógica']
+  indexes {
+    (proveedor_id, producto_id) [unique, name: 'uq_proveedor_producto']
+  }
 }
 
 Table estado_orden_compra {
-  id int [pk, increment]
-  nombre varchar(50) [not null, unique]
+  estadoordencompra_id int [pk, increment]
+  nombre varchar(50) [not null, unique, note: 'Pendiente, Aprobada, Rechazada, Recibida, Devuelto, Contabilizado (valores de catálogo)']
 }
 
 Table orden_compra {
-  id int [pk, increment]
-  proveedor_id int [not null, ref: > proveedor.id]
-  estado_id int [not null, ref: > estado_orden_compra.id]
+  ordencompra_id int [pk, increment]
+  proveedor_id int [not null, ref: > proveedor.proveedor_id]
+  estado_id int [not null, ref: > estado_orden_compra.estadoordencompra_id]
   fecha timestamp [not null]
   total decimal(12,2) [not null]
 }
 
 Table orden_compra_detalle {
-  id int [pk, increment]
-  orden_compra_id int [not null, ref: > orden_compra.id]
-  producto_id int [not null, ref: > producto.id]
+  ordencompradetalle_id int [pk, increment]
+  ordencompra_id int [not null, ref: > orden_compra.ordencompra_id]
+  producto_id int [not null, note: 'Referencia lógica a Producto: PositiveIntegerField, NO FK']
   cantidad int [not null]
-  precio_unitario decimal(12,2) [not null]
+  preciounitario decimal(12,2) [not null, note: 'Atributo Django: precio_unitario; db_column: preciounitario']
 }
 
 Table cliente {
-  id int [pk, increment]
+  id int [pk, increment, note: 'Atributo Django: id_cliente']
   nombre varchar(150) [not null]
-  telefono varchar(50)
-  email varchar(150)
-  direccion varchar(200)
+  telefono varchar(50) [null]
+  email varchar(100) [null]
+  direccion varchar(200) [null]
+  cuil varchar(20) [null]
+  condicion_iva varchar(50) [null]
+  estado varchar(2) [not null, default: 'AC', note: 'AC activo, OF baja lógica']
 }
 
 Table estado_orden_venta {
-  id int [pk, increment]
+  id bigint [pk, increment]
   nombre varchar(50) [not null, unique]
+  descripcion varchar(200) [not null, default: '']
 }
 
 Table orden_venta {
-  id int [pk, increment]
+  id bigint [pk, increment]
   cliente_id int [not null, ref: > cliente.id]
-  estado_id int [not null, ref: > estado_orden_venta.id]
+  usuario_id int [null, ref: > auth_user.id]
+  estado_id bigint [not null, ref: > estado_orden_venta.id]
+  forma_pago varchar(20) [not null, note: 'EFECTIVO, DEBITO, CREDITO, TRANSFERENCIA']
+  numero_comprobante varchar(20) [null, unique]
+  tipo_comprobante varchar(20) [null, note: 'FACTURA_A, FACTURA_B, FACTURA_C, NOTA_VENTA']
   fecha timestamp [not null]
-  total decimal(12,2) [not null]
+  total decimal(12,2) [not null, default: 0]
 }
 
 Table orden_venta_detalle {
-  id int [pk, increment]
-  orden_venta_id int [not null, ref: > orden_venta.id]
-  producto_id int [not null, ref: > producto.id]
+  id bigint [pk, increment]
+  orden_venta_id bigint [not null, ref: > orden_venta.id]
+  producto_id bigint [not null, ref: > producto.id]
   cantidad int [not null]
   precio_unitario decimal(12,2) [not null]
+  descuento decimal(12,2) [not null, default: 0]
+}
+
+Table anulacion {
+  id bigint [pk, increment]
+  orden_venta_id bigint [not null, unique, ref: - orden_venta.id]
+  motivo varchar(100) [not null]
+  detalle text [null]
+  fecha timestamp [not null]
+}
+
+Table nota_credito {
+  id bigint [pk, increment]
+  orden_venta_id bigint [not null, ref: > orden_venta.id]
+  monto decimal(12,2) [not null]
+  saldo_a_favor boolean [not null, default: false]
+  fecha timestamp [not null]
+}
+
+Table detalle_nota_credito {
+  id bigint [pk, increment]
+  nota_credito_id bigint [not null, ref: > nota_credito.id]
+  producto_id bigint [not null, ref: > producto.id]
+  cantidad_devuelta int [not null]
+  destino varchar(30) [not null, note: 'STOCK_DISPONIBLE o PRODUCTO_DANADO']
 }
 
 Table periodo {
-  id int [pk, increment]
+  id bigint [pk, increment]
   anio int [not null]
-  mes int [not null]
-
+  mes smallint [not null]
   indexes {
-    (anio, mes) [unique]
+    (anio, mes) [unique, name: 'uq_periodo_anio_mes']
   }
 }
 
 Table cierre_mensual {
-  id int [pk, increment]
-  periodo_id int [not null, ref: > periodo.id]
-  fecha_cierre timestamp
-  estado varchar(20) [not null]
+  id bigint [pk, increment]
+  periodo_id bigint [not null, ref: > periodo.id]
+  fecha_cierre timestamp [null]
+  estado varchar(20) [not null, default: 'ABIERTO', note: 'ABIERTO o CERRADO']
 }
 
 Table diario {
-  id int [pk, increment]
-  cierre_mensual_id int [not null, ref: > cierre_mensual.id]
+  id bigint [pk, increment]
+  cierre_mensual_id bigint [not null, ref: > cierre_mensual.id]
   fecha timestamp [not null]
-  descripcion varchar(255)
+  descripcion varchar(255) [not null, default: '']
 }
 
 Table factura_cabecera {
-  id int [pk, increment]
-  orden_venta_id int [ref: > orden_venta.id]
-  orden_compra_id int [ref: > orden_compra.id]
-  diario_id int [ref: > diario.id]
-  tipo varchar(20) [not null]
+  id bigint [pk, increment]
+  orden_venta_id int [null, note: 'Referencia lógica a OrdenVenta; NO FK']
+  orden_compra_id int [null, note: 'Referencia lógica a OrdenCompra; NO FK']
+  diario_id bigint [null, ref: > diario.id]
+  tipo varchar(20) [not null, note: 'VENTA o COMPRA']
   numero varchar(50) [not null]
   fecha timestamp [not null]
-  subtotal decimal(12,2) [not null]
-  impuestos decimal(12,2) [not null]
-  total decimal(12,2) [not null]
+  subtotal decimal(12,2) [not null, default: 0]
+  impuestos decimal(12,2) [not null, default: 0]
+  total decimal(12,2) [not null, default: 0]
+  indexes {
+    (tipo, numero) [unique, name: 'uq_factura_tipo_numero']
+  }
 }
 
 Table factura_detalle {
-  id int [pk, increment]
-  factura_id int [not null, ref: > factura_cabecera.id]
-  producto_id int [not null, ref: > producto.id]
+  id bigint [pk, increment]
+  factura_id bigint [not null, ref: > factura_cabecera.id]
+  producto_id int [not null, note: 'Referencia lógica a Producto; NO FK']
   cantidad int [not null]
   precio_unitario decimal(12,2) [not null]
   subtotal decimal(12,2) [not null]
 }
+
