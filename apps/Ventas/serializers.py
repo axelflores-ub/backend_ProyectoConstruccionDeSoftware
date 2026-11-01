@@ -248,6 +248,7 @@ class AnulacionSerializer(serializers.ModelSerializer):
             orden_venta=validated_data["orden_venta"],
             motivo=validated_data["motivo"],
             detalle=validated_data.get("detalle", ""),
+            usuario=_usuario_autenticado(self.context.get("request")),
         )
 
 

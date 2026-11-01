@@ -342,6 +342,33 @@ class OrdenVentaTests(BaseVentasTest):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(OrdenVenta.objects.get().total, Decimal("2500.00"))
 
+    def test_descuento_mayor_al_subtotal_se_rechaza(self):
+        body = self.orden_body(cantidad=2)  # subtotal 2 x 1300 = 2600
+        body["detalles"][0]["descuento"] = "2600.01"
+        response = self.client.post(URL_ORDENES, body, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["codigo"], "descuento_supera_subtotal")
+        self.assertIn("detalles", response.data["errores"])
+        self.assertFalse(OrdenVenta.objects.exists())
+        self.assertEqual(self.stock(self.producto), 100)
+
+    def test_descuento_igual_al_subtotal_es_valido(self):
+        body = self.orden_body(cantidad=2)
+        body["detalles"][0]["descuento"] = "2600.00"
+        response = self.client.post(URL_ORDENES, body, format="json")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(OrdenVenta.objects.get().total, Decimal("0.00"))
+
+    def test_el_total_nunca_es_negativo(self):
+        body = self.orden_body()
+        body["detalles"] = [
+            {"producto": self.producto.id, "cantidad": 1, "descuento": "1300.00"},
+            {"producto": self.producto2.id, "cantidad": 1, "descuento": "9999.00"},
+        ]
+        response = self.client.post(URL_ORDENES, body, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(OrdenVenta.objects.exists())
+
     def test_crear_orden_con_comprobante(self):
         response = self.client.post(
             URL_ORDENES,
@@ -491,7 +518,7 @@ class OrdenVentaTests(BaseVentasTest):
 
     def test_modificar_orden_que_no_esta_pendiente(self):
         orden = self.crear_orden()
-        services.anular_orden_venta(orden_venta=orden, motivo="x")
+        services.anular_orden_venta(orden_venta=orden, motivo="x", usuario=self.usuario)
         response = self.client.patch(f"{URL_ORDENES}{orden.id}/", {"forma_pago": "DEBITO"}, format="json")
         self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
         self.assertEqual(response.data["codigo"], "orden_no_modificable")
@@ -528,6 +555,56 @@ class AnulacionTests(BaseVentasTest):
         orden.refresh_from_db()
         self.assertEqual(orden.estado.nombre, EstadoOrdenVenta.ANULADA)
         self.assertEqual(Anulacion.objects.get().motivo, "Cliente se arrepintió")
+
+    def test_anular_repone_el_stock(self):
+        orden = self.crear_orden(cantidad=2)  # stock 98
+        self.assertEqual(self.stock(self.producto), 98)
+        response = self.client.post(URL_ANULACIONES, {"orden_venta": orden.id, "motivo": "x"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(self.stock(self.producto), 100)
+
+    def test_anular_registra_un_movimiento_de_inventario(self):
+        orden = self.crear_orden(cantidad=2)
+        self.client.post(URL_ANULACIONES, {"orden_venta": orden.id, "motivo": "x"}, format="json")
+        movimiento = MovimientoInventario.objects.get(observacion=f"Anulación - orden #{orden.id}")
+        self.assertEqual(movimiento.tipo, MovimientoInventario.Tipo.DEVOLUCION)
+        self.assertEqual(movimiento.cantidad, 2)
+        self.assertEqual(movimiento.producto, self.producto)
+        self.assertEqual(movimiento.usuario, self.usuario)
+
+    def test_anular_repone_todos_los_productos_de_la_orden(self):
+        orden = services.registrar_orden_venta(
+            cuil=CUIL_CLIENTE,
+            datos={"forma_pago": "EFECTIVO"},
+            detalles=[
+                {"producto": self.producto, "cantidad": 2},
+                {"producto": self.producto2, "cantidad": 3},
+                {"producto": self.producto, "cantidad": 1},  # mismo producto repetido
+            ],
+            usuario=self.usuario,
+        )
+        self.assertEqual((self.stock(self.producto), self.stock(self.producto2)), (97, 47))
+        self.client.post(URL_ANULACIONES, {"orden_venta": orden.id, "motivo": "x"}, format="json")
+        self.assertEqual((self.stock(self.producto), self.stock(self.producto2)), (100, 50))
+
+    def test_anular_dos_veces_no_repone_dos_veces(self):
+        orden = self.crear_orden(cantidad=2)
+        self.client.post(URL_ANULACIONES, {"orden_venta": orden.id, "motivo": "1"}, format="json")
+        self.client.post(URL_ANULACIONES, {"orden_venta": orden.id, "motivo": "2"}, format="json")
+        self.assertEqual(self.stock(self.producto), 100)
+
+    def test_anulacion_rechazada_no_toca_el_stock(self):
+        orden = self.crear_orden(cantidad=2)
+        self.client.post(
+            URL_NOTAS,
+            {"orden_venta": orden.id, "detalles": [
+                {"producto": self.producto.id, "cantidad_devuelta": 1, "destino": "STOCK_DISPONIBLE"}]},
+            format="json",
+        )
+        stock_antes = self.stock(self.producto)  # 99
+        response = self.client.post(URL_ANULACIONES, {"orden_venta": orden.id, "motivo": "x"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(self.stock(self.producto), stock_antes)
 
     def test_no_se_puede_anular_dos_veces(self):
         orden = self.crear_orden()
@@ -680,7 +757,7 @@ class NotaCreditoTests(BaseVentasTest):
 
     def test_orden_anulada_no_admite_devolucion(self):
         orden = self.crear_orden()
-        services.anular_orden_venta(orden_venta=orden, motivo="x")
+        services.anular_orden_venta(orden_venta=orden, motivo="x", usuario=self.usuario)
         response = self.devolver(orden)
         self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
         self.assertEqual(response.data["codigo"], "estado_de_orden_invalido")

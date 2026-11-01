@@ -182,6 +182,19 @@ def registrar_orden_venta(*, cuil, datos, detalles, usuario=None):
                 codigo="producto_sin_precio",
             )
 
+    # El descuento de un ítem no puede superar su subtotal (cantidad x precio unitario).
+    for item in detalles:
+        producto = productos[item["producto"].id]
+        descuento = item.get("descuento") or Decimal("0")
+        subtotal = precios[producto.id] * item["cantidad"]
+        if descuento > subtotal:
+            raise SolicitudInvalida(
+                f"El descuento ({descuento}) no puede superar el subtotal de "
+                f"'{producto.nombre}' ({subtotal}).",
+                codigo="descuento_supera_subtotal",
+                campo="detalles",
+            )
+
     for producto_id, cantidad_total in cantidad_por_producto.items():
         producto = productos[producto_id]
         if producto.stock_actual < cantidad_total:
@@ -229,9 +242,11 @@ def registrar_orden_venta(*, cuil, datos, detalles, usuario=None):
 
 
 @transaction.atomic
-def anular_orden_venta(*, orden_venta, motivo, detalle=""):
-    """Registra la anulación y mueve la orden al estado 'Anulada'.
-    Solo se puede anular una orden en estado 'Pendiente'."""
+def anular_orden_venta(*, orden_venta, motivo, detalle="", usuario=None):
+    """Registra la anulación, mueve la orden al estado 'Anulada' y repone el stock de lo
+    que la orden había descontado (con un movimiento DEVOLUCION por producto).
+    Solo se puede anular una orden en estado 'Pendiente'; como todavía no tiene
+    devoluciones, se repone la cantidad completa de cada ítem."""
     orden = OrdenVenta.objects.select_for_update().get(pk=orden_venta.pk)
     if orden.estado.nombre == EstadoOrdenVenta.ANULADA:
         raise Conflicto("Esta orden ya fue anulada.", codigo="orden_ya_anulada")
@@ -241,6 +256,24 @@ def anular_orden_venta(*, orden_venta, motivo, detalle=""):
     anulacion = Anulacion.objects.create(orden_venta=orden, motivo=motivo, detalle=detalle or "")
     orden.estado = _estado(EstadoOrdenVenta.ANULADA)
     orden.save(update_fields=["estado"])
+
+    cantidad_por_producto = {}
+    for detalle_orden in orden.detalles.all():
+        producto_id = detalle_orden.producto_id
+        cantidad_por_producto[producto_id] = (
+            cantidad_por_producto.get(producto_id, 0) + detalle_orden.cantidad
+        )
+    for producto in Producto.objects.select_for_update().filter(id__in=cantidad_por_producto):
+        cantidad = cantidad_por_producto[producto.id]
+        producto.stock_actual += cantidad
+        producto.save(update_fields=["stock_actual"])
+        _registrar_movimiento(
+            producto=producto,
+            usuario=usuario or orden.usuario,
+            tipo=MovimientoInventario.Tipo.DEVOLUCION,
+            cantidad=cantidad,
+            observacion=f"Anulación - orden #{orden.pk}",
+        )
     return anulacion
 
 
